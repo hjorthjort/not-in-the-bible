@@ -177,16 +177,34 @@ code {
   margin: 0 0 12px;
 }
 
+.supported-networks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.supported-networks li {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 252, 246, 0.82);
+  color: var(--muted);
+  font-size: 0.96rem;
+}
+
 .loading {
   text-align: center;
 }
 
-.tweet-embed {
+.post-embed {
   display: flex;
   justify-content: center;
 }
 
-.tweet-text {
+.post-text {
   font-size: clamp(1.2rem, 2vw, 1.6rem);
   line-height: 1.9;
   white-space: break-spaces;
