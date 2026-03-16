@@ -1,5 +1,11 @@
 export {};
 
+import {
+  extractTweetTextFromHtml,
+  normalizeWord,
+  TOKEN_PATTERN
+} from "./lib/tweet-analysis.js";
+
 const appElement = document.querySelector<HTMLElement>("#app");
 const formElement = document.querySelector<HTMLFormElement>("#tweet-form");
 const inputElement = document.querySelector<HTMLInputElement>("#tweet-url");
@@ -16,7 +22,6 @@ const input = inputElement;
 const tooltip = tooltipElement;
 const sourceSelect = sourceSelectElement;
 
-const TOKEN_PATTERN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 const DEFAULT_SOURCE_ID = "kjv";
 const REDIRECT_PARAM = "__redirect";
 
@@ -78,7 +83,6 @@ type TextPart =
       inBible: boolean;
       verseIds: number[];
     };
-
 type Route =
   | { type: "home"; sourceId: string }
   | { type: "tweet"; username: string; statusId: string; canonicalUrl: string; sourceId: string }
@@ -120,12 +124,12 @@ const escapeHtml = (value: string): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-function normalizeWord(word: string): string {
-  return word
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[’']/g, "")
-    .toLowerCase();
+function resolveSourceId(catalog: SourceCatalog, requestedSourceId: string | null | undefined): string {
+  if (requestedSourceId && catalog.sources.some((source) => source.id === requestedSourceId)) {
+    return requestedSourceId;
+  }
+
+  return catalog.defaultSourceId;
 }
 
 const IRREGULAR_NORMALIZATIONS: Record<string, string[]> = {
@@ -307,30 +311,6 @@ function parseTweetUrl(value: string): { username: string; statusId: string; can
   }
 }
 
-function extractTweetText(node: Node | null): string {
-  if (!node) {
-    return "";
-  }
-
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent ?? "";
-  }
-
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return "";
-  }
-
-  if (node.nodeName === "IMG" || node.nodeName === "A") {
-    return "[...]";
-  }
-
-  if (node.nodeName === "BR") {
-    return "\n";
-  }
-
-  return Array.from(node.childNodes, (childNode) => extractTweetText(childNode)).join("");
-}
-
 async function loadSourceCatalog(): Promise<SourceCatalog> {
   if (dataState.catalogPayload) {
     return dataState.catalogPayload;
@@ -433,7 +413,6 @@ function buildAnalyzedText(text: string, wordData: WordIndexPayload): TextPart[]
 
   return parts;
 }
-
 function sampleVerses(verseIds: number[], verseData: VersePayload, count = 5): Verse[] {
   const shuffled = [...verseIds];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
@@ -449,39 +428,6 @@ function sampleVerses(verseIds: number[], verseData: VersePayload, count = 5): V
 
 function getRandomVerse(verseData: VersePayload): Verse {
   return verseData.verses[Math.floor(Math.random() * verseData.verses.length)];
-}
-
-function renderHighlightedVerseText(text: string, matchedWords: string[]): string {
-  if (!matchedWords.length) {
-    return escapeHtml(text);
-  }
-
-  const matchedSet = new Set(matchedWords.map((word) => normalizeWord(word)).filter(Boolean));
-  let markup = "";
-  let lastIndex = 0;
-
-  for (const match of text.matchAll(TOKEN_PATTERN)) {
-    const [rawWord] = match;
-    const start = match.index ?? 0;
-    const end = start + rawWord.length;
-
-    if (start > lastIndex) {
-      markup += escapeHtml(text.slice(lastIndex, start));
-    }
-
-    const tokenMarkup = escapeHtml(rawWord);
-    markup += matchedSet.has(normalizeWord(rawWord))
-      ? `<mark class="tooltip__match">${tokenMarkup}</mark>`
-      : tokenMarkup;
-
-    lastIndex = end;
-  }
-
-  if (lastIndex < text.length) {
-    markup += escapeHtml(text.slice(lastIndex));
-  }
-
-  return markup;
 }
 
 async function renderErrorState({
@@ -519,12 +465,7 @@ async function renderErrorState({
   `;
 }
 
-function showTooltip(
-  target: HTMLElement,
-  verses: Verse[],
-  matchedWords: string[],
-  matchLabel?: string | null
-): void {
+function showTooltip(target: HTMLElement, verses: Verse[], matchLabel?: string | null): void {
   if (!verses.length) {
     tooltip.hidden = true;
     return;
@@ -538,7 +479,7 @@ function showTooltip(
         (verse) => `
           <a class="tooltip__verse" href="${verse.url}" target="_blank" rel="noreferrer">
             <strong>${escapeHtml(verse.reference)}</strong>
-            <span>${renderHighlightedVerseText(verse.text, matchedWords)}</span>
+            <span>${escapeHtml(verse.text)}</span>
           </a>
         `
       )
@@ -578,9 +519,7 @@ async function syncSourceSelect(selectedSourceId: string): Promise<void> {
       `
     )
     .join("");
-  sourceSelect.value = catalog.sources.some((source) => source.id === selectedSourceId)
-    ? selectedSourceId
-    : catalog.defaultSourceId;
+  sourceSelect.value = resolveSourceId(catalog, selectedSourceId);
 }
 
 async function fetchTweetEmbed(tweetUrl: string): Promise<TweetEmbed> {
@@ -596,9 +535,7 @@ async function fetchTweetEmbed(tweetUrl: string): Promise<TweetEmbed> {
   }
 
   const payload = (await response.json()) as { html: string };
-  const parser = new DOMParser();
-  const documentFragment = parser.parseFromString(payload.html, "text/html");
-  const text = extractTweetText(documentFragment.querySelector("blockquote p")).trim();
+  const text = extractTweetTextFromHtml(payload.html);
 
   return {
     html: payload.html,
@@ -607,7 +544,9 @@ async function fetchTweetEmbed(tweetUrl: string): Promise<TweetEmbed> {
 }
 
 async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promise<void> {
-  await syncSourceSelect(route.sourceId);
+  const catalog = await loadSourceCatalog();
+  const sourceId = resolveSourceId(catalog, route.sourceId);
+  await syncSourceSelect(sourceId);
   input.value = route.canonicalUrl;
   app.innerHTML = `
     <section class="panel loading">
@@ -618,7 +557,7 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
   try {
     const [tweet, bibleData] = await Promise.all([
       fetchTweetEmbed(route.canonicalUrl),
-      loadWordIndex(route.sourceId)
+      loadWordIndex(sourceId)
     ]);
 
     const text = tweet.text;
@@ -665,16 +604,16 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
         if (part.inBible && element instanceof HTMLAnchorElement) {
           const linkedWord =
             part.matchedWords.length === 1 ? part.matchedWords[0] : part.normalized;
-          element.href = `/word/${encodeURIComponent(linkedWord)}?source=${encodeURIComponent(route.sourceId)}`;
+          element.href = `/word/${encodeURIComponent(linkedWord)}?source=${encodeURIComponent(sourceId)}`;
           element.dataset.word = linkedWord;
           element.addEventListener("mouseenter", async () => {
-            const data = await loadVerses(route.sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
+            const data = await loadVerses(sourceId);
+            showTooltip(element, sampleVerses(part.verseIds, data), part.matchLabel);
           });
           element.addEventListener("mouseleave", hideTooltip);
           element.addEventListener("focus", async () => {
-            const data = await loadVerses(route.sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
+            const data = await loadVerses(sourceId);
+            showTooltip(element, sampleVerses(part.verseIds, data), part.matchLabel);
           });
           element.addEventListener("blur", hideTooltip);
         }
@@ -690,13 +629,15 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
     await renderErrorState({
       title: "Couldn't find tweet",
       message: "Couldn't find tweet",
-      sourceId: route.sourceId
+      sourceId
     });
   }
 }
 
 async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise<void> {
-  await syncSourceSelect(route.sourceId);
+  const catalog = await loadSourceCatalog();
+  const sourceId = resolveSourceId(catalog, route.sourceId);
+  await syncSourceSelect(sourceId);
   app.innerHTML = `
     <section class="panel loading">
       <p>Loading verses…</p>
@@ -705,8 +646,8 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
 
   try {
     const [wordData, verseData] = await Promise.all([
-      loadWordIndex(route.sourceId),
-      loadVerses(route.sourceId)
+      loadWordIndex(sourceId),
+      loadVerses(sourceId)
     ]);
     const resolved = resolveWordMatch(route.word, wordData);
     const displayWord = resolved.matchedWord ?? resolved.normalized;
@@ -745,7 +686,7 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
               (verse) => `
                 <article class="verse-card">
                   <a href="${verse.url}" target="_blank" rel="noreferrer">${escapeHtml(verse.reference)}</a>
-                  <p>${renderHighlightedVerseText(verse.text, resolved.matchedWords)}</p>
+                  <p>${escapeHtml(verse.text)}</p>
                 </article>
               `
             )
@@ -758,7 +699,7 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
     await renderErrorState({
       title: "Word lookup failed",
       message,
-      sourceId: route.sourceId
+      sourceId
     });
   }
 }
@@ -813,15 +754,17 @@ function restoreRedirectedPath(): void {
 async function renderRoute(): Promise<void> {
   hideTooltip();
   const route = parsePath(window.location.pathname, window.location.search);
-  await syncSourceSelect(route.sourceId);
+  const catalog = await loadSourceCatalog();
+  const sourceId = resolveSourceId(catalog, route.sourceId);
+  await syncSourceSelect(sourceId);
 
   if (route.type === "tweet") {
-    await renderTweetRoute(route);
+    await renderTweetRoute({ ...route, sourceId });
     return;
   }
 
   if (route.type === "word") {
-    await renderWordRoute(route);
+    await renderWordRoute({ ...route, sourceId });
     return;
   }
 
@@ -829,7 +772,7 @@ async function renderRoute(): Promise<void> {
     await renderErrorState({
       title: "Page not found",
       message: "Page not found",
-      sourceId: route.sourceId
+      sourceId
     });
     return;
   }

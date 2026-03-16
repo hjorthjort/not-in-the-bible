@@ -241,13 +241,6 @@ code {
   line-height: 1.45;
 }
 
-.tooltip__match {
-  padding: 0 0.14em;
-  border-radius: 0.2em;
-  background: rgba(162, 49, 40, 0.18);
-  color: inherit;
-}
-
 .verse-list {
   display: grid;
   gap: 14px;

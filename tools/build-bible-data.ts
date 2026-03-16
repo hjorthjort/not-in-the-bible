@@ -14,73 +14,90 @@ const LEGACY_OUTPUT_FILES = [
   path.join(OUTPUT_DIR, "bible-meta.json")
 ];
 
-const BOOKS: Record<string, { name: string; slug: string }> = {
-  GEN: { name: "Genesis", slug: "genesis" },
-  EXO: { name: "Exodus", slug: "exodus" },
-  LEV: { name: "Leviticus", slug: "leviticus" },
-  NUM: { name: "Numbers", slug: "numbers" },
-  DEU: { name: "Deuteronomy", slug: "deuteronomy" },
-  JOS: { name: "Joshua", slug: "joshua" },
-  JDG: { name: "Judges", slug: "judges" },
-  RUT: { name: "Ruth", slug: "ruth" },
-  "1SA": { name: "1 Samuel", slug: "1_samuel" },
-  "2SA": { name: "2 Samuel", slug: "2_samuel" },
-  "1KI": { name: "1 Kings", slug: "1_kings" },
-  "2KI": { name: "2 Kings", slug: "2_kings" },
-  "1CH": { name: "1 Chronicles", slug: "1_chronicles" },
-  "2CH": { name: "2 Chronicles", slug: "2_chronicles" },
-  EZR: { name: "Ezra", slug: "ezra" },
-  NEH: { name: "Nehemiah", slug: "nehemiah" },
-  EST: { name: "Esther", slug: "esther" },
-  JOB: { name: "Job", slug: "job" },
-  PSA: { name: "Psalms", slug: "psalms" },
-  PRO: { name: "Proverbs", slug: "proverbs" },
-  ECC: { name: "Ecclesiastes", slug: "ecclesiastes" },
-  SNG: { name: "Song of Solomon", slug: "songs" },
-  ISA: { name: "Isaiah", slug: "isaiah" },
-  JER: { name: "Jeremiah", slug: "jeremiah" },
-  LAM: { name: "Lamentations", slug: "lamentations" },
-  EZK: { name: "Ezekiel", slug: "ezekiel" },
-  DAN: { name: "Daniel", slug: "daniel" },
-  HOS: { name: "Hosea", slug: "hosea" },
-  JOL: { name: "Joel", slug: "joel" },
-  AMO: { name: "Amos", slug: "amos" },
-  OBA: { name: "Obadiah", slug: "obadiah" },
-  JON: { name: "Jonah", slug: "jonah" },
-  MIC: { name: "Micah", slug: "micah" },
-  NAM: { name: "Nahum", slug: "nahum" },
-  HAB: { name: "Habakkuk", slug: "habakkuk" },
-  ZEP: { name: "Zephaniah", slug: "zephaniah" },
-  HAG: { name: "Haggai", slug: "haggai" },
-  ZEC: { name: "Zechariah", slug: "zechariah" },
-  MAL: { name: "Malachi", slug: "malachi" },
-  MAT: { name: "Matthew", slug: "matthew" },
-  MRK: { name: "Mark", slug: "mark" },
-  LUK: { name: "Luke", slug: "luke" },
-  JHN: { name: "John", slug: "john" },
-  ACT: { name: "Acts", slug: "acts" },
-  ROM: { name: "Romans", slug: "romans" },
-  "1CO": { name: "1 Corinthians", slug: "1_corinthians" },
-  "2CO": { name: "2 Corinthians", slug: "2_corinthians" },
-  GAL: { name: "Galatians", slug: "galatians" },
-  EPH: { name: "Ephesians", slug: "ephesians" },
-  PHP: { name: "Philippians", slug: "philippians" },
-  COL: { name: "Colossians", slug: "colossians" },
-  "1TH": { name: "1 Thessalonians", slug: "1_thessalonians" },
-  "2TH": { name: "2 Thessalonians", slug: "2_thessalonians" },
-  "1TI": { name: "1 Timothy", slug: "1_timothy" },
-  "2TI": { name: "2 Timothy", slug: "2_timothy" },
-  TIT: { name: "Titus", slug: "titus" },
-  PHM: { name: "Philemon", slug: "philemon" },
-  HEB: { name: "Hebrews", slug: "hebrews" },
-  JAS: { name: "James", slug: "james" },
-  "1PE": { name: "1 Peter", slug: "1_peter" },
-  "2PE": { name: "2 Peter", slug: "2_peter" },
-  "1JN": { name: "1 John", slug: "1_john" },
-  "2JN": { name: "2 John", slug: "2_john" },
-  "3JN": { name: "3 John", slug: "3_john" },
-  JUD: { name: "Jude", slug: "jude" },
-  REV: { name: "Revelation", slug: "revelation" }
+const BOOKS: Record<string, { name: string }> = {
+  GEN: { name: "Genesis" },
+  EXO: { name: "Exodus" },
+  LEV: { name: "Leviticus" },
+  NUM: { name: "Numbers" },
+  DEU: { name: "Deuteronomy" },
+  JOS: { name: "Joshua" },
+  JDG: { name: "Judges" },
+  RUT: { name: "Ruth" },
+  "1SA": { name: "1 Samuel" },
+  "2SA": { name: "2 Samuel" },
+  "1KI": { name: "1 Kings" },
+  "2KI": { name: "2 Kings" },
+  "1CH": { name: "1 Chronicles" },
+  "2CH": { name: "2 Chronicles" },
+  EZR: { name: "Ezra" },
+  NEH: { name: "Nehemiah" },
+  EST: { name: "Esther" },
+  JOB: { name: "Job" },
+  PSA: { name: "Psalms" },
+  PRO: { name: "Proverbs" },
+  ECC: { name: "Ecclesiastes" },
+  SNG: { name: "Song of Solomon" },
+  ISA: { name: "Isaiah" },
+  JER: { name: "Jeremiah" },
+  LAM: { name: "Lamentations" },
+  EZK: { name: "Ezekiel" },
+  DAN: { name: "Daniel" },
+  HOS: { name: "Hosea" },
+  JOL: { name: "Joel" },
+  AMO: { name: "Amos" },
+  OBA: { name: "Obadiah" },
+  JON: { name: "Jonah" },
+  MIC: { name: "Micah" },
+  NAM: { name: "Nahum" },
+  HAB: { name: "Habakkuk" },
+  ZEP: { name: "Zephaniah" },
+  HAG: { name: "Haggai" },
+  ZEC: { name: "Zechariah" },
+  MAL: { name: "Malachi" },
+  MAT: { name: "Matthew" },
+  MRK: { name: "Mark" },
+  LUK: { name: "Luke" },
+  JHN: { name: "John" },
+  ACT: { name: "Acts" },
+  ROM: { name: "Romans" },
+  "1CO": { name: "1 Corinthians" },
+  "2CO": { name: "2 Corinthians" },
+  GAL: { name: "Galatians" },
+  EPH: { name: "Ephesians" },
+  PHP: { name: "Philippians" },
+  COL: { name: "Colossians" },
+  "1TH": { name: "1 Thessalonians" },
+  "2TH": { name: "2 Thessalonians" },
+  "1TI": { name: "1 Timothy" },
+  "2TI": { name: "2 Timothy" },
+  TIT: { name: "Titus" },
+  PHM: { name: "Philemon" },
+  HEB: { name: "Hebrews" },
+  JAS: { name: "James" },
+  "1PE": { name: "1 Peter" },
+  "2PE": { name: "2 Peter" },
+  "1JN": { name: "1 John" },
+  "2JN": { name: "2 John" },
+  "3JN": { name: "3 John" },
+  JUD: { name: "Jude" },
+  REV: { name: "Revelation" },
+  TOB: { name: "Tobit" },
+  JDT: { name: "Judith" },
+  ESG: { name: "Esther (Greek)" },
+  WIS: { name: "Wisdom" },
+  SIR: { name: "Sirach" },
+  BAR: { name: "Baruch" },
+  LJE: { name: "Letter of Jeremiah" },
+  SUS: { name: "Susanna" },
+  BEL: { name: "Bel and the Dragon" },
+  "1MA": { name: "1 Maccabees" },
+  "2MA": { name: "2 Maccabees" },
+  "3MA": { name: "3 Maccabees" },
+  MAN: { name: "Prayer of Manasseh" },
+  "1ES": { name: "1 Esdras" },
+  "2ES": { name: "2 Esdras" },
+  DAG: { name: "Daniel (Greek)" },
+  PS: { name: "Psalm 151" }
 };
 
 const CHAPTER_FILE_PATTERN = /^([1-3]?[A-Z]{2,3})(\d{2,3})\.htm$/;
@@ -131,8 +148,8 @@ function normalizeWord(word: string): string {
     .toLowerCase();
 }
 
-function toBibleHubUrl(book: { slug: string }, chapter: number, verse: number): string {
-  return `https://biblehub.com/${book.slug}/${chapter}-${verse}.htm`;
+function toSourceVerseUrl(source: BibleSource, filename: string, verse: number): string {
+  return `${source.sourceUrl}${filename}#V${verse}`;
 }
 
 function parseVerses(html: string, bookCode: string, chapter: number): ParsedVerse[] {
@@ -184,7 +201,7 @@ async function downloadSourceArchive(source: BibleSource): Promise<string> {
   return archivePath;
 }
 
-function buildIndexForSource(sourceZip: string): {
+function buildIndexForSource(source: BibleSource, sourceZip: string): {
   stats: { verseCount: number; indexedWordCount: number };
   verses: IndexedVerse[];
   words: Record<string, number[]>;
@@ -229,7 +246,7 @@ function buildIndexForSource(sourceZip: string): {
         chapter: verse.chapter,
         verse: verse.verse,
         reference,
-        url: toBibleHubUrl(book, verse.chapter, verse.verse),
+        url: toSourceVerseUrl(source, chapterFile.filename, verse.verse),
         text: verse.text
       });
 
@@ -278,7 +295,7 @@ async function main(): Promise<void> {
 
   for (const source of BIBLE_SOURCES) {
     const sourceZip = await downloadSourceArchive(source);
-    const { stats, verses, words } = buildIndexForSource(sourceZip);
+    const { stats, verses, words } = buildIndexForSource(source, sourceZip);
     const outputDir = path.join(OUTPUT_DIR, source.id);
     mkdirSync(outputDir, { recursive: true });
 
