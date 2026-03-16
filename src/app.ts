@@ -1,19 +1,112 @@
-const app = document.querySelector("#app");
-const form = document.querySelector("#tweet-form");
-const input = document.querySelector("#tweet-url");
-const tooltip = document.querySelector("#tooltip");
-const sourceSelect = document.querySelector("#bible-source");
+export {};
+
+const appElement = document.querySelector<HTMLElement>("#app");
+const formElement = document.querySelector<HTMLFormElement>("#tweet-form");
+const inputElement = document.querySelector<HTMLInputElement>("#tweet-url");
+const tooltipElement = document.querySelector<HTMLElement>("#tooltip");
+const sourceSelectElement = document.querySelector<HTMLSelectElement>("#bible-source");
+
+if (!appElement || !formElement || !inputElement || !tooltipElement || !sourceSelectElement) {
+  throw new Error("Missing required app elements.");
+}
+
+const app = appElement;
+const form = formElement;
+const input = inputElement;
+const tooltip = tooltipElement;
+const sourceSelect = sourceSelectElement;
 
 const TOKEN_PATTERN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 const DEFAULT_SOURCE_ID = "kjv";
-const dataState = {
+
+type Verse = {
+  id: number;
+  bookCode: string;
+  bookName: string;
+  chapter: number;
+  verse: number;
+  reference: string;
+  url: string;
+  text: string;
+};
+
+type SourceMetadata = {
+  id: string;
+  name: string;
+  shortName: string;
+  description: string;
+  sourceUrl: string;
+  archiveUrl: string;
+  license: string;
+  licenseUrl: string;
+};
+
+type SourceStats = {
+  verseCount: number;
+  indexedWordCount: number;
+};
+
+type SourceCatalog = {
+  defaultSourceId: string;
+  sources: Array<SourceMetadata & { stats: SourceStats }>;
+};
+
+type WordIndexPayload = {
+  source: SourceMetadata;
+  stats: SourceStats;
+  words: Record<string, number[]>;
+};
+
+type VersePayload = {
+  source: SourceMetadata;
+  stats: SourceStats;
+  verses: Verse[];
+  verseById?: Map<number, Verse>;
+};
+
+type TextPart =
+  | { type: "text"; value: string }
+  | {
+      type: "word";
+      rawWord: string;
+      normalized: string;
+      inBible: boolean;
+      verseIds: number[];
+    };
+
+type Route =
+  | { type: "home"; sourceId: string }
+  | { type: "tweet"; username: string; statusId: string; canonicalUrl: string; sourceId: string }
+  | { type: "word"; word: string; sourceId: string };
+
+type TweetEmbed = {
+  html: string;
+  text: string;
+};
+
+declare global {
+  interface Window {
+    twttr?: {
+      widgets?: {
+        load: (element?: Element | null) => void;
+      };
+    };
+  }
+}
+
+const dataState: {
+  catalogPromise: Promise<SourceCatalog> | null;
+  catalogPayload: SourceCatalog | null;
+  wordsBySource: Map<string, Promise<WordIndexPayload> | WordIndexPayload>;
+  versesBySource: Map<string, Promise<VersePayload> | VersePayload>;
+} = {
   catalogPromise: null,
   catalogPayload: null,
   wordsBySource: new Map(),
   versesBySource: new Map()
 };
 
-const escapeHtml = (value) =>
+const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -21,7 +114,7 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-function normalizeWord(word) {
+function normalizeWord(word: string): string {
   return word
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -29,7 +122,7 @@ function normalizeWord(word) {
     .toLowerCase();
 }
 
-function parseTweetUrl(value) {
+function parseTweetUrl(value: string): { username: string; statusId: string; canonicalUrl: string } | null {
   try {
     const url = new URL(value.trim());
     const host = url.hostname.replace(/^www\./, "");
@@ -53,7 +146,7 @@ function parseTweetUrl(value) {
   }
 }
 
-async function loadSourceCatalog() {
+async function loadSourceCatalog(): Promise<SourceCatalog> {
   if (dataState.catalogPayload) {
     return dataState.catalogPayload;
   }
@@ -64,7 +157,7 @@ async function loadSourceCatalog() {
         throw new Error("Failed to load Bible source catalog.");
       }
 
-      const payload = await response.json();
+      const payload = (await response.json()) as SourceCatalog;
       dataState.catalogPayload = payload;
       return payload;
     });
@@ -73,9 +166,10 @@ async function loadSourceCatalog() {
   return dataState.catalogPromise;
 }
 
-async function loadWordIndex(sourceId) {
-  if (dataState.wordsBySource.has(sourceId)) {
-    return dataState.wordsBySource.get(sourceId);
+async function loadWordIndex(sourceId: string): Promise<WordIndexPayload> {
+  const cached = dataState.wordsBySource.get(sourceId);
+  if (cached) {
+    return cached;
   }
 
   const promise = fetch(`/data/${sourceId}/words.json`).then(async (response) => {
@@ -83,7 +177,7 @@ async function loadWordIndex(sourceId) {
       throw new Error("Failed to load Bible index.");
     }
 
-    const payload = await response.json();
+    const payload = (await response.json()) as WordIndexPayload;
     dataState.wordsBySource.set(sourceId, payload);
     return payload;
   });
@@ -92,28 +186,29 @@ async function loadWordIndex(sourceId) {
   return promise;
 }
 
-async function loadVerses(sourceId) {
-  if (dataState.versesBySource.has(sourceId)) {
-    return dataState.versesBySource.get(sourceId);
+async function loadVerses(sourceId: string): Promise<VersePayload> {
+  const cached = dataState.versesBySource.get(sourceId);
+  if (cached) {
+    return cached;
   }
 
   const promise = fetch(`/data/${sourceId}/verses.json`).then(async (response) => {
-      if (!response.ok) {
-        throw new Error("Failed to load verse data.");
-      }
+    if (!response.ok) {
+      throw new Error("Failed to load verse data.");
+    }
 
-      const payload = await response.json();
-      payload.verseById = new Map(payload.verses.map((verse) => [verse.id, verse]));
-      dataState.versesBySource.set(sourceId, payload);
-      return payload;
-    });
+    const payload = (await response.json()) as VersePayload;
+    payload.verseById = new Map(payload.verses.map((verse) => [verse.id, verse]));
+    dataState.versesBySource.set(sourceId, payload);
+    return payload;
+  });
 
   dataState.versesBySource.set(sourceId, promise);
   return promise;
 }
 
-function buildAnalyzedText(text, wordData) {
-  const parts = [];
+function buildAnalyzedText(text: string, wordData: WordIndexPayload): TextPart[] {
+  const parts: TextPart[] = [];
   let lastIndex = 0;
 
   for (const match of text.matchAll(TOKEN_PATTERN)) {
@@ -151,17 +246,20 @@ function buildAnalyzedText(text, wordData) {
   return parts;
 }
 
-function sampleVerses(verseIds, verseData, count = 5) {
+function sampleVerses(verseIds: number[], verseData: VersePayload, count = 5): Verse[] {
   const shuffled = [...verseIds];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
     [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
   }
 
-  return shuffled.slice(0, count).map((id) => verseData.verseById.get(id));
+  return shuffled
+    .slice(0, count)
+    .map((id) => verseData.verseById?.get(id))
+    .filter((verse): verse is Verse => Boolean(verse));
 }
 
-function showTooltip(target, verses) {
+function showTooltip(target: HTMLElement, verses: Verse[]): void {
   if (!verses.length) {
     tooltip.hidden = true;
     return;
@@ -184,11 +282,11 @@ function showTooltip(target, verses) {
   tooltip.hidden = false;
 }
 
-function hideTooltip() {
+function hideTooltip(): void {
   tooltip.hidden = true;
 }
 
-function renderHome() {
+function renderHome(): void {
   app.innerHTML = `
     <section class="panel">
       <h1>Paste a tweet URL</h1>
@@ -203,7 +301,7 @@ function renderHome() {
   `;
 }
 
-async function syncSourceSelect(selectedSourceId) {
+async function syncSourceSelect(selectedSourceId: string): Promise<void> {
   const catalog = await loadSourceCatalog();
   sourceSelect.innerHTML = catalog.sources
     .map(
@@ -217,7 +315,7 @@ async function syncSourceSelect(selectedSourceId) {
     : catalog.defaultSourceId;
 }
 
-async function fetchTweetEmbed(tweetUrl) {
+async function fetchTweetEmbed(tweetUrl: string): Promise<TweetEmbed> {
   const endpoint = new URL("https://publish.twitter.com/oembed");
   endpoint.searchParams.set("url", tweetUrl);
   endpoint.searchParams.set("omit_script", "1");
@@ -229,7 +327,7 @@ async function fetchTweetEmbed(tweetUrl) {
     throw new Error(`Tweet lookup failed with ${response.status}.`);
   }
 
-  const payload = await response.json();
+  const payload = (await response.json()) as { html: string };
   const parser = new DOMParser();
   const documentFragment = parser.parseFromString(payload.html, "text/html");
   const text = documentFragment.querySelector("blockquote p")?.textContent?.trim() ?? "";
@@ -240,7 +338,7 @@ async function fetchTweetEmbed(tweetUrl) {
   };
 }
 
-async function renderTweetRoute(route) {
+async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promise<void> {
   await syncSourceSelect(route.sourceId);
   input.value = route.canonicalUrl;
   app.innerHTML = `
@@ -278,7 +376,7 @@ async function renderTweetRoute(route) {
       </section>
     `;
 
-    const textContainer = document.querySelector("#tweet-text");
+    const textContainer = document.querySelector<HTMLElement>("#tweet-text");
     if (textContainer) {
       const fragment = document.createDocumentFragment();
 
@@ -292,7 +390,7 @@ async function renderTweetRoute(route) {
         element.className = part.inBible ? "word word--present" : "word word--missing";
         element.textContent = part.rawWord;
 
-        if (part.inBible) {
+        if (part.inBible && element instanceof HTMLAnchorElement) {
           element.href = `/word/${encodeURIComponent(part.normalized)}?source=${encodeURIComponent(route.sourceId)}`;
           element.dataset.word = part.normalized;
           element.addEventListener("mouseenter", async () => {
@@ -313,14 +411,13 @@ async function renderTweetRoute(route) {
       textContainer.replaceChildren(fragment);
     }
 
-    if (window.twttr?.widgets) {
-      window.twttr.widgets.load(document.querySelector("#tweet-embed"));
-    }
+    window.twttr?.widgets?.load(document.querySelector("#tweet-embed"));
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     app.innerHTML = `
       <section class="panel">
         <h1>Tweet lookup failed</h1>
-        <p>${escapeHtml(error.message)}</p>
+        <p>${escapeHtml(message)}</p>
         <p class="muted">
           For a purely static site, public oEmbed is the workable no-key path. If X stops returning oEmbed data, the fallback is adding a tiny serverless fetcher or manual paste mode.
         </p>
@@ -329,8 +426,7 @@ async function renderTweetRoute(route) {
   }
 }
 
-async function renderWordRoute(word) {
-  const route = parsePath(window.location.pathname, window.location.search);
+async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise<void> {
   await syncSourceSelect(route.sourceId);
   app.innerHTML = `
     <section class="panel loading">
@@ -343,7 +439,7 @@ async function renderWordRoute(word) {
       loadWordIndex(route.sourceId),
       loadVerses(route.sourceId)
     ]);
-    const normalized = normalizeWord(word);
+    const normalized = normalizeWord(route.word);
     const verseIds = wordData.words[normalized] ?? [];
 
     if (!verseIds.length) {
@@ -356,7 +452,10 @@ async function renderWordRoute(word) {
       return;
     }
 
-    const verses = verseIds.map((id) => verseData.verseById.get(id));
+    const verses = verseIds
+      .map((id) => verseData.verseById?.get(id))
+      .filter((verse): verse is Verse => Boolean(verse));
+
     app.innerHTML = `
       <section class="panel">
         <h1>${escapeHtml(normalized)} <span class="source-tag">${escapeHtml(wordData.source.shortName)}</span></h1>
@@ -376,16 +475,17 @@ async function renderWordRoute(word) {
       </section>
     `;
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     app.innerHTML = `
       <section class="panel">
         <h1>Word lookup failed</h1>
-        <p>${escapeHtml(error.message)}</p>
+        <p>${escapeHtml(message)}</p>
       </section>
     `;
   }
 }
 
-function parsePath(pathname, search = window.location.search) {
+function parsePath(pathname: string, search = window.location.search): Route {
   const params = new URLSearchParams(search);
   const requestedSourceId = params.get("source") || localStorage.getItem("preferredBibleSource") || DEFAULT_SOURCE_ID;
   const tweetMatch = pathname.match(/^\/([^/]+)\/status\/(\d+)\/?$/);
@@ -412,7 +512,7 @@ function parsePath(pathname, search = window.location.search) {
   return { type: "home", sourceId: requestedSourceId };
 }
 
-async function renderRoute() {
+async function renderRoute(): Promise<void> {
   hideTooltip();
   const route = parsePath(window.location.pathname, window.location.search);
   await syncSourceSelect(route.sourceId);
@@ -423,18 +523,18 @@ async function renderRoute() {
   }
 
   if (route.type === "word") {
-    await renderWordRoute(route.word);
+    await renderWordRoute(route);
     return;
   }
 
   renderHome();
 }
 
-function navigate(pathname, sourceId = sourceSelect.value || DEFAULT_SOURCE_ID) {
+function navigate(pathname: string, sourceId = sourceSelect.value || DEFAULT_SOURCE_ID): void {
   const search = sourceId && sourceId !== DEFAULT_SOURCE_ID ? `?source=${encodeURIComponent(sourceId)}` : "";
   localStorage.setItem("preferredBibleSource", sourceId);
   window.history.pushState({}, "", `${pathname}${search}`);
-  renderRoute();
+  void renderRoute();
 }
 
 form.addEventListener("submit", (event) => {
@@ -451,7 +551,12 @@ form.addEventListener("submit", (event) => {
 });
 
 document.addEventListener("click", (event) => {
-  const link = event.target.closest("a[href^='/']");
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  const link = target.closest<HTMLAnchorElement>("a[href^='/']");
   if (!link || link.target === "_blank") {
     return;
   }
@@ -468,10 +573,10 @@ sourceSelect.addEventListener("change", () => {
 });
 
 window.addEventListener("popstate", () => {
-  renderRoute();
+  void renderRoute();
 });
 
 window.addEventListener("scroll", hideTooltip, { passive: true });
 window.addEventListener("resize", hideTooltip);
 
-renderRoute();
+void renderRoute();

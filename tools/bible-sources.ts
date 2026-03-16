@@ -1,6 +1,17 @@
 export const DEFAULT_SOURCE_ID = "kjv";
 
-export const BIBLE_SOURCES = [
+export type BibleSource = {
+  id: string;
+  name: string;
+  shortName: string;
+  description: string;
+  archiveUrl: string;
+  sourceUrl: string;
+  license: string;
+  licenseUrl: string;
+};
+
+export const BIBLE_SOURCES: BibleSource[] = [
   {
     id: "kjv",
     name: "King James Version",
@@ -32,7 +43,3 @@ export const BIBLE_SOURCES = [
     licenseUrl: "https://ebible.org/engBBE/copyright.htm"
   }
 ];
-
-export function getBibleSourceById(id) {
-  return BIBLE_SOURCES.find((source) => source.id === id) ?? BIBLE_SOURCES[0];
-}

@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, existsSync, createWriteStream, readdirSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 
-import { BIBLE_SOURCES } from "./bible-sources.mjs";
+import { BIBLE_SOURCES, type BibleSource } from "./bible-sources.js";
 
 const OUTPUT_DIR = path.resolve("data");
 const SOURCE_DIR = path.join(OUTPUT_DIR, "source");
@@ -14,7 +14,7 @@ const LEGACY_OUTPUT_FILES = [
   path.join(OUTPUT_DIR, "bible-meta.json")
 ];
 
-const BOOKS = {
+const BOOKS: Record<string, { name: string; slug: string }> = {
   GEN: { name: "Genesis", slug: "genesis" },
   EXO: { name: "Exodus", slug: "exodus" },
   LEV: { name: "Leviticus", slug: "leviticus" },
@@ -86,10 +86,24 @@ const BOOKS = {
 const CHAPTER_FILE_PATTERN = /^([1-3]?[A-Z]{2,3})(\d{2,3})\.htm$/;
 const TOKEN_PATTERN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 
-function decodeHtml(input) {
+type ParsedVerse = {
+  bookCode: string;
+  chapter: number;
+  verse: number;
+  text: string;
+};
+
+type IndexedVerse = ParsedVerse & {
+  id: number;
+  bookName: string;
+  reference: string;
+  url: string;
+};
+
+function decodeHtml(input: string): string {
   return input
     .replace(/&#160;/g, " ")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
@@ -98,7 +112,7 @@ function decodeHtml(input) {
     .replace(/&gt;/g, ">");
 }
 
-function stripTags(input) {
+function stripTags(input: string): string {
   return decodeHtml(
     input
       .replace(/<a\b[^>]*class="notemark"[^>]*>.*?<\/a>/gis, " ")
@@ -109,7 +123,7 @@ function stripTags(input) {
     .trim();
 }
 
-function normalizeWord(word) {
+function normalizeWord(word: string): string {
   return word
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -117,39 +131,43 @@ function normalizeWord(word) {
     .toLowerCase();
 }
 
-function toBibleHubUrl(book, chapter, verse) {
+function toBibleHubUrl(book: { slug: string }, chapter: number, verse: number): string {
   return `https://biblehub.com/${book.slug}/${chapter}-${verse}.htm`;
 }
 
-function parseVerses(html, bookCode, chapter) {
+function parseVerses(html: string, bookCode: string, chapter: number): ParsedVerse[] {
   const mainContent = html.split('<div class="footnote">')[0] ?? html;
-  const matches = [...mainContent.matchAll(/<span class="verse" id="V(\d+)">\d+&#160;<\/span>([\s\S]*?)(?=<span class="verse" id="V\d+">|<ul class='tnav'>)/g)];
+  const matches = [
+    ...mainContent.matchAll(/<span class="verse" id="V(\d+)">\d+&#160;<\/span>([\s\S]*?)(?=<span class="verse" id="V\d+">|<ul class='tnav'>)/g)
+  ];
 
-  return matches.map((match) => {
-    const verse = Number(match[1]);
-    const text = stripTags(match[2]);
-    return {
-      bookCode,
-      chapter,
-      verse,
-      text
-    };
-  }).filter((entry) => entry.text);
+  return matches
+    .map((match) => {
+      const verse = Number(match[1]);
+      const text = stripTags(match[2]);
+      return {
+        bookCode,
+        chapter,
+        verse,
+        text
+      };
+    })
+    .filter((entry) => entry.text);
 }
 
-function listArchiveFiles(sourceZip) {
+function listArchiveFiles(sourceZip: string): string[] {
   const output = execFileSync("unzip", ["-Z1", sourceZip], { encoding: "utf8" });
   return output.split("\n").filter(Boolean);
 }
 
-function readArchiveFile(sourceZip, filename) {
+function readArchiveFile(sourceZip: string, filename: string): string {
   return execFileSync("unzip", ["-p", sourceZip, filename], {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024
   });
 }
 
-async function downloadSourceArchive(source) {
+async function downloadSourceArchive(source: BibleSource): Promise<string> {
   mkdirSync(SOURCE_DIR, { recursive: true });
   const archivePath = path.join(SOURCE_DIR, `${source.id}.zip`);
 
@@ -166,7 +184,11 @@ async function downloadSourceArchive(source) {
   return archivePath;
 }
 
-function buildIndexForSource(source, sourceZip) {
+function buildIndexForSource(sourceZip: string): {
+  stats: { verseCount: number; indexedWordCount: number };
+  verses: IndexedVerse[];
+  words: Record<string, number[]>;
+} {
   const archiveFiles = listArchiveFiles(sourceZip);
   const chapterFiles = archiveFiles
     .map((filename) => {
@@ -186,11 +208,11 @@ function buildIndexForSource(source, sourceZip) {
         chapter: Number(chapterDigits)
       };
     })
-    .filter(Boolean)
+    .filter((entry): entry is { filename: string; bookCode: string; chapter: number } => Boolean(entry))
     .sort((left, right) => left.filename.localeCompare(right.filename));
 
-  const verses = [];
-  const wordIndex = new Map();
+  const verses: IndexedVerse[] = [];
+  const wordIndex = new Map<string, number[]>();
 
   for (const chapterFile of chapterFiles) {
     const html = readArchiveFile(sourceZip, chapterFile.filename);
@@ -211,7 +233,7 @@ function buildIndexForSource(source, sourceZip) {
         text: verse.text
       });
 
-      const seenInVerse = new Set();
+      const seenInVerse = new Set<string>();
       const tokens = verse.text.match(TOKEN_PATTERN) ?? [];
       for (const token of tokens) {
         const normalized = normalizeWord(token);
@@ -220,10 +242,9 @@ function buildIndexForSource(source, sourceZip) {
         }
 
         seenInVerse.add(normalized);
-        if (!wordIndex.has(normalized)) {
-          wordIndex.set(normalized, []);
-        }
-        wordIndex.get(normalized).push(id);
+        const entries = wordIndex.get(normalized) ?? [];
+        entries.push(id);
+        wordIndex.set(normalized, entries);
       }
     }
   }
@@ -237,17 +258,14 @@ function buildIndexForSource(source, sourceZip) {
   return { stats, verses, words };
 }
 
-async function main() {
+async function main(): Promise<void> {
   mkdirSync(OUTPUT_DIR, { recursive: true });
   for (const legacyFile of LEGACY_OUTPUT_FILES) {
     rmSync(legacyFile, { force: true });
   }
-  for (const entry of readdirSync(OUTPUT_DIR, { withFileTypes: true })) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
 
-    if (entry.name === "source") {
+  for (const entry of readdirSync(OUTPUT_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "source") {
       continue;
     }
 
@@ -256,11 +274,11 @@ async function main() {
     }
   }
 
-  const catalog = [];
+  const catalog: Array<BibleSource & { stats: { verseCount: number; indexedWordCount: number } }> = [];
 
   for (const source of BIBLE_SOURCES) {
     const sourceZip = await downloadSourceArchive(source);
-    const { stats, verses, words } = buildIndexForSource(source, sourceZip);
+    const { stats, verses, words } = buildIndexForSource(sourceZip);
     const outputDir = path.join(OUTPUT_DIR, source.id);
     mkdirSync(outputDir, { recursive: true });
 
