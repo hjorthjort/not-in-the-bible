@@ -78,7 +78,8 @@ type TextPart =
 type Route =
   | { type: "home"; sourceId: string }
   | { type: "tweet"; username: string; statusId: string; canonicalUrl: string; sourceId: string }
-  | { type: "word"; word: string; sourceId: string };
+  | { type: "word"; word: string; sourceId: string }
+  | { type: "notFound"; sourceId: string };
 
 type TweetEmbed = {
   html: string;
@@ -284,6 +285,41 @@ function getRandomVerse(verseData: VersePayload): Verse {
   return verseData.verses[Math.floor(Math.random() * verseData.verses.length)];
 }
 
+async function renderErrorState({
+  title,
+  message,
+  sourceId = DEFAULT_SOURCE_ID
+}: {
+  title: string;
+  message: string;
+  sourceId?: string;
+}): Promise<void> {
+  let verseMarkup = "";
+
+  try {
+    const verseData = await loadVerses(sourceId);
+    const verse = getRandomVerse(verseData);
+    verseMarkup = `
+      <aside class="error-verse">
+        <p class="error-verse__eyebrow">Random verse from ${escapeHtml(verseData.source.shortName)}</p>
+        <a class="error-verse__link" href="${verse.url}" target="_blank" rel="noreferrer">${escapeHtml(verse.reference)}</a>
+        <p class="error-verse__text">${escapeHtml(verse.text)}</p>
+      </aside>
+    `;
+  } catch {
+    verseMarkup = "";
+  }
+
+  app.innerHTML = `
+    <section class="panel panel--error">
+      <p class="error-code">Error</p>
+      <h1>${escapeHtml(title)}</h1>
+      <p>${escapeHtml(message)}</p>
+      ${verseMarkup}
+    </section>
+  `;
+}
+
 function showTooltip(target: HTMLElement, verses: Verse[]): void {
   if (!verses.length) {
     tooltip.hidden = true;
@@ -438,20 +474,11 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
 
     window.twttr?.widgets?.load(document.querySelector("#tweet-embed"));
   } catch {
-    const verseData = await loadVerses(route.sourceId);
-    const verse = getRandomVerse(verseData);
-    app.innerHTML = `
-      <section class="panel panel--error">
-        <p class="error-code">Error</p>
-        <h1>Couldn't find tweet</h1>
-        <p>Couldn't find tweet</p>
-        <aside class="error-verse">
-          <p class="error-verse__eyebrow">Random verse from ${escapeHtml(verseData.source.shortName)}</p>
-          <a class="error-verse__link" href="${verse.url}" target="_blank" rel="noreferrer">${escapeHtml(verse.reference)}</a>
-          <p class="error-verse__text">${escapeHtml(verse.text)}</p>
-        </aside>
-      </section>
-    `;
+    await renderErrorState({
+      title: "Couldn't find tweet",
+      message: "Couldn't find tweet",
+      sourceId: route.sourceId
+    });
   }
 }
 
@@ -505,12 +532,11 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
     `;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    app.innerHTML = `
-      <section class="panel">
-        <h1>Word lookup failed</h1>
-        <p>${escapeHtml(message)}</p>
-      </section>
-    `;
+    await renderErrorState({
+      title: "Word lookup failed",
+      message,
+      sourceId: route.sourceId
+    });
   }
 }
 
@@ -538,7 +564,11 @@ function parsePath(pathname: string, search = window.location.search): Route {
     };
   }
 
-  return { type: "home", sourceId: requestedSourceId };
+  if (pathname === "/" || pathname === "") {
+    return { type: "home", sourceId: requestedSourceId };
+  }
+
+  return { type: "notFound", sourceId: requestedSourceId };
 }
 
 function restoreRedirectedPath(): void {
@@ -569,6 +599,15 @@ async function renderRoute(): Promise<void> {
 
   if (route.type === "word") {
     await renderWordRoute(route);
+    return;
+  }
+
+  if (route.type === "notFound") {
+    await renderErrorState({
+      title: "Page not found",
+      message: "Page not found",
+      sourceId: route.sourceId
+    });
     return;
   }
 
