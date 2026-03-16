@@ -2,6 +2,7 @@ export {};
 
 import { buildAnalyzedText, resolveWordMatch } from "./lib/word-match.js";
 import { renderHighlightedVerseText } from "./lib/verse-highlight.js";
+import { sortVersesByBibleOrder } from "./lib/verse-order.js";
 import { extractTweetTextFromHtml } from "./lib/tweet-analysis.js";
 
 const appElement = document.querySelector<HTMLElement>("#app");
@@ -507,9 +508,11 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
       return;
     }
 
-    const verses = verseIds
-      .map((id) => verseData.verseById?.get(id))
-      .filter((verse): verse is Verse => Boolean(verse));
+    const verses = sortVersesByBibleOrder(
+      verseIds
+        .map((id) => verseData.verseById?.get(id))
+        .filter((verse): verse is Verse => Boolean(verse))
+    );
 
     app.innerHTML = `
       <section class="panel">
