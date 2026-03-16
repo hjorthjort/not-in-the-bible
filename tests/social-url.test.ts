@@ -38,10 +38,17 @@ test("supported networks are detected from canonical URLs", () => {
     "lobsters"
   );
   assert.equal(getSocialNetworkFromUrl("https://www.quora.com/What-is-the-best-programming-language"), "quora");
+  assert.equal(
+    getSocialNetworkFromUrl("https://github.com/octocat/Hello-World/issues/349#issuecomment-304183431"),
+    "github"
+  );
+  assert.equal(getSocialNetworkFromUrl("https://github.com/openai/openai-node/pull/45#discussion_r1087568161"), "github");
+  assert.equal(getSocialNetworkFromUrl("https://github.com/openai/openai-node/pull/45#pullrequestreview-1270655770"), "github");
 });
 
 test("unsupported URLs are rejected", () => {
   assert.equal(isSupportedSocialUrl("https://example.com/post/123"), false);
   assert.equal(isSupportedSocialUrl("https://news.ycombinator.com/news"), false);
+  assert.equal(isSupportedSocialUrl("https://github.com/octocat/Hello-World/issues"), false);
   assert.equal(isSupportedSocialUrl("not-a-url"), false);
 });

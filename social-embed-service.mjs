@@ -2,6 +2,10 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const META_EMBED_API_VERSION = "v25.0";
 const REDDIT_JSON_USER_AGENT =
   "words-in-the-bible/0.1 (+https://github.com/hjort/wods-in-the-bible)";
+const GITHUB_API_HEADERS = {
+  Accept: "application/vnd.github+json",
+  "User-Agent": REDDIT_JSON_USER_AGENT
+};
 
 export class SocialEmbedError extends Error {
   constructor(status, message) {
@@ -483,6 +487,10 @@ function detectNetwork(url) {
     return "quora";
   }
 
+  if (host === "github.com") {
+    return "github";
+  }
+
   throw new SocialEmbedError(400, "Unsupported post URL.");
 }
 
@@ -678,6 +686,73 @@ function normalizeQuoraUrl(url) {
   return `https://www.quora.com/${segments.join("/")}`;
 }
 
+function getGitHubCommentReference(url) {
+  const hash = url.hash.replace(/^#/, "");
+
+  if (!hash) {
+    return null;
+  }
+
+  const issueCommentMatch = hash.match(/^issuecomment-(\d+)$/i);
+  if (issueCommentMatch) {
+    return {
+      commentId: issueCommentMatch[1],
+      type: "issuecomment"
+    };
+  }
+
+  const reviewCommentMatch = hash.match(/^discussion_r(\d+)$/i);
+  if (reviewCommentMatch) {
+    return {
+      commentId: reviewCommentMatch[1],
+      type: "reviewcomment"
+    };
+  }
+
+  const reviewMatch = hash.match(/^pullrequestreview-(\d+)$/i);
+  if (reviewMatch) {
+    return {
+      commentId: reviewMatch[1],
+      type: "review"
+    };
+  }
+
+  return null;
+}
+
+function getGitHubResource(url) {
+  const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)(?:\/files)?/);
+  if (!match) {
+    return null;
+  }
+
+  const [, owner, repo, kind, number] = match;
+  return {
+    owner,
+    repo,
+    kind,
+    number
+  };
+}
+
+function normalizeGitHubUrl(url) {
+  const resource = getGitHubResource(url);
+  if (!resource) {
+    throw new SocialEmbedError(400, "Enter a GitHub issue or pull request URL.");
+  }
+
+  const canonical = new URL(
+    `https://github.com/${resource.owner}/${resource.repo}/${resource.kind}/${resource.number}`
+  );
+  const commentReference = getGitHubCommentReference(url);
+
+  if (commentReference) {
+    canonical.hash = `#${url.hash.replace(/^#/, "")}`;
+  }
+
+  return canonical.toString();
+}
+
 function getRedditCommentId(url) {
   const segments = url.pathname.split("/").filter(Boolean);
   const commentsIndex = segments.indexOf("comments");
@@ -733,6 +808,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeLobstersUrl(url), network };
     case "quora":
       return { canonicalUrl: normalizeQuoraUrl(url), network };
+    case "github":
+      return { canonicalUrl: normalizeGitHubUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -1301,6 +1378,94 @@ async function fetchQuoraEmbed(canonicalUrl) {
   };
 }
 
+function buildGitHubIssueApiUrl({ owner, repo, number }) {
+  return `https://api.github.com/repos/${owner}/${repo}/issues/${number}`;
+}
+
+function buildGitHubIssueCommentApiUrl({ owner, repo }, commentId) {
+  return `https://api.github.com/repos/${owner}/${repo}/issues/comments/${commentId}`;
+}
+
+function buildGitHubReviewCommentApiUrl({ owner, repo }, commentId) {
+  return `https://api.github.com/repos/${owner}/${repo}/pulls/comments/${commentId}`;
+}
+
+function buildGitHubReviewApiUrl({ owner, repo, number }, reviewId) {
+  return `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/reviews/${reviewId}`;
+}
+
+async function fetchGitHubApiJson(url, options = {}) {
+  return fetchJson(url, {
+    headers: GITHUB_API_HEADERS,
+    signal: options.signal
+  });
+}
+
+function buildGitHubEmbedHtml(resource, canonicalUrl, parent, bodyText, comment, commentReference) {
+  const isPull = Boolean(parent.pull_request) || resource.kind === "pull";
+  const numberLabel = `${isPull ? "PR" : "Issue"} #${resource.number}`;
+  const repoLabel = `${resource.owner}/${resource.repo}`;
+  const metaParts = [repoLabel, numberLabel, parent.state].filter(Boolean);
+  const isComment = Boolean(comment);
+  const title = isComment
+    ? `${commentReference?.type === "review" ? "Review" : "Comment"} by ${comment.user?.login ?? "unknown"}`
+    : compactWhitespace(parent.title ?? `${isPull ? "Pull request" : "Issue"} ${resource.number}`);
+
+  return buildSocialCardHtml({
+    actions: [
+      {
+        href: canonicalUrl,
+        label: "Open on GitHub"
+      }
+    ],
+    canonicalUrl,
+    context: isComment && parent.title ? { href: parent.html_url, label: `On ${parent.title}` } : null,
+    eyebrow: `GitHub ${isComment ? "comment" : isPull ? "pull request" : "issue"}`,
+    metaParts,
+    networkClass: "github",
+    previewText: bodyText,
+    title
+  });
+}
+
+async function fetchGitHubEmbed(canonicalUrl, options = {}) {
+  const parsedUrl = new URL(canonicalUrl);
+  const resource = getGitHubResource(parsedUrl);
+  if (!resource) {
+    throw new SocialEmbedError(400, "Enter a GitHub issue or pull request URL.");
+  }
+
+  const parent = await fetchGitHubApiJson(buildGitHubIssueApiUrl(resource), options);
+  const commentReference = getGitHubCommentReference(parsedUrl);
+  let comment = null;
+  let text = combineText(parent.title ?? "", compactWhitespace(parent.body ?? ""));
+
+  if (commentReference) {
+    switch (commentReference.type) {
+      case "issuecomment":
+        comment = await fetchGitHubApiJson(buildGitHubIssueCommentApiUrl(resource, commentReference.commentId), options);
+        break;
+      case "reviewcomment":
+        comment = await fetchGitHubApiJson(buildGitHubReviewCommentApiUrl(resource, commentReference.commentId), options);
+        break;
+      case "review":
+        comment = await fetchGitHubApiJson(buildGitHubReviewApiUrl(resource, commentReference.commentId), options);
+        break;
+      default:
+        comment = null;
+    }
+
+    text = compactWhitespace(comment?.body ?? "");
+  }
+
+  return {
+    canonicalUrl,
+    html: buildGitHubEmbedHtml(resource, canonicalUrl, parent, text, comment, commentReference),
+    network: "github",
+    text
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -1337,6 +1502,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchLobstersEmbed(canonicalUrl, options);
     case "quora":
       return fetchQuoraEmbed(canonicalUrl);
+    case "github":
+      return fetchGitHubEmbed(canonicalUrl, options);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
