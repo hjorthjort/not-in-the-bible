@@ -161,6 +161,10 @@ function extractTweetText(node: Node | null): string {
     return "";
   }
 
+  if (node.nodeName === "IMG" || node.nodeName === "A") {
+    return "[...]";
+  }
+
   if (node.nodeName === "BR") {
     return "\n";
   }
