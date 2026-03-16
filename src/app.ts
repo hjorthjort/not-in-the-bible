@@ -72,7 +72,9 @@ type TextPart =
       rawWord: string;
       normalized: string;
       matchedWord: string | null;
+      matchedWords: string[];
       matchType: "exact" | "normalized" | "missing";
+      matchLabel: string | null;
       inBible: boolean;
       verseIds: number[];
     };
@@ -128,6 +130,49 @@ function normalizeWord(word: string): string {
 
 const IRREGULAR_NORMALIZATIONS: Record<string, string[]> = {
   childrens: ["children"]
+};
+
+const CONTRACTION_EXPANSIONS: Record<string, string[]> = {
+  dont: ["do", "not"],
+  doesnt: ["does", "not"],
+  didnt: ["did", "not"],
+  cant: ["can", "not"],
+  couldnt: ["could", "not"],
+  wont: ["will", "not"],
+  wouldnt: ["would", "not"],
+  shouldnt: ["should", "not"],
+  isnt: ["is", "not"],
+  arent: ["are", "not"],
+  wasnt: ["was", "not"],
+  werent: ["were", "not"],
+  havent: ["have", "not"],
+  hasnt: ["has", "not"],
+  hadnt: ["had", "not"],
+  im: ["i", "am"],
+  ive: ["i", "have"],
+  ill: ["i", "will"],
+  id: ["i", "would"],
+  youre: ["you", "are"],
+  youve: ["you", "have"],
+  youll: ["you", "will"],
+  hes: ["he", "is"],
+  hed: ["he", "would"],
+  hell: ["he", "will"],
+  shes: ["she", "is"],
+  shed: ["she", "would"],
+  shell: ["she", "will"],
+  its: ["it", "is"],
+  itd: ["it", "would"],
+  itll: ["it", "will"],
+  were: ["we", "are"],
+  weve: ["we", "have"],
+  well: ["we", "will"],
+  theyre: ["they", "are"],
+  theyve: ["they", "have"],
+  theyll: ["they", "will"],
+  thats: ["that", "is"],
+  theres: ["there", "is"],
+  whats: ["what", "is"]
 };
 
 function getWordCandidates(word: string): string[] {
@@ -186,11 +231,31 @@ function resolveWordMatch(
 ): {
   normalized: string;
   matchedWord: string | null;
+  matchedWords: string[];
   matchType: "exact" | "normalized" | "missing";
+  matchLabel: string | null;
   verseIds: number[];
 } {
   const candidates = getWordCandidates(rawWord);
   const normalized = candidates[0] ?? normalizeWord(rawWord);
+  const contractionExpansion = CONTRACTION_EXPANSIONS[normalized];
+
+  if (contractionExpansion?.length) {
+    const expandedVerseIds = contractionExpansion
+      .map((candidate) => wordData.words[candidate] ?? [])
+      .flat();
+
+    if (expandedVerseIds.length) {
+      return {
+        normalized,
+        matchedWord: contractionExpansion.join(" "),
+        matchedWords: contractionExpansion,
+        matchType: "normalized",
+        matchLabel: `Inexact match: expanded to ${contractionExpansion.join(" ")}`,
+        verseIds: [...new Set(expandedVerseIds)]
+      };
+    }
+  }
 
   for (const [index, candidate] of candidates.entries()) {
     const verseIds = wordData.words[candidate];
@@ -201,7 +266,9 @@ function resolveWordMatch(
     return {
       normalized,
       matchedWord: candidate,
+      matchedWords: [candidate],
       matchType: index === 0 ? "exact" : "normalized",
+      matchLabel: index === 0 ? null : `Inexact match: matched as ${candidate}`,
       verseIds
     };
   }
@@ -209,7 +276,9 @@ function resolveWordMatch(
   return {
     normalized,
     matchedWord: null,
+    matchedWords: [],
     matchType: "missing",
+    matchLabel: null,
     verseIds: []
   };
 }
@@ -346,7 +415,9 @@ function buildAnalyzedText(text: string, wordData: WordIndexPayload): TextPart[]
       rawWord,
       normalized: resolved.normalized,
       matchedWord: resolved.matchedWord,
+      matchedWords: resolved.matchedWords,
       matchType: resolved.matchType,
+      matchLabel: resolved.matchLabel,
       inBible,
       verseIds: resolved.verseIds
     });
@@ -415,22 +486,25 @@ async function renderErrorState({
   `;
 }
 
-function showTooltip(target: HTMLElement, verses: Verse[]): void {
+function showTooltip(target: HTMLElement, verses: Verse[], matchLabel?: string | null): void {
   if (!verses.length) {
     tooltip.hidden = true;
     return;
   }
 
-  tooltip.innerHTML = verses
-    .map(
-      (verse) => `
-        <a class="tooltip__verse" href="${verse.url}" target="_blank" rel="noreferrer">
-          <strong>${escapeHtml(verse.reference)}</strong>
-          <span>${escapeHtml(verse.text)}</span>
-        </a>
-      `
-    )
-    .join("");
+  const matchNote = matchLabel ? `<p class="tooltip__label">${escapeHtml(matchLabel)}</p>` : "";
+  tooltip.innerHTML =
+    matchNote +
+    verses
+      .map(
+        (verse) => `
+          <a class="tooltip__verse" href="${verse.url}" target="_blank" rel="noreferrer">
+            <strong>${escapeHtml(verse.reference)}</strong>
+            <span>${escapeHtml(verse.text)}</span>
+          </a>
+        `
+      )
+      .join("");
 
   const rect = target.getBoundingClientRect();
   tooltip.style.left = `${Math.min(window.innerWidth - 340, Math.max(16, rect.left + window.scrollX))}px`;
@@ -521,7 +595,6 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
           <span>${inBibleCount} words in the Bible</span>
           <span>${missingCount} words not in the Bible</span>
         </div>
-        <p class="match-legend muted">Gray highlight = matched after light normalization.</p>
         ${
           text
             ? `<p class="tweet-text" id="tweet-text"></p>`
@@ -547,22 +620,23 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
         element.className = part.inBible ? "word word--present" : "word word--missing";
         if (part.matchType === "normalized") {
           element.classList.add("word--normalized");
-          element.title = part.matchedWord ? `Matched as ${part.matchedWord}` : "Matched after normalization";
+          element.title = part.matchLabel ?? "Inexact match";
         }
         element.textContent = part.rawWord;
 
         if (part.inBible && element instanceof HTMLAnchorElement) {
-          const linkedWord = part.matchedWord ?? part.normalized;
+          const linkedWord =
+            part.matchedWords.length === 1 ? part.matchedWords[0] : part.normalized;
           element.href = `/word/${encodeURIComponent(linkedWord)}?source=${encodeURIComponent(route.sourceId)}`;
           element.dataset.word = linkedWord;
           element.addEventListener("mouseenter", async () => {
             const data = await loadVerses(route.sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data));
+            showTooltip(element, sampleVerses(part.verseIds, data), part.matchLabel);
           });
           element.addEventListener("mouseleave", hideTooltip);
           element.addEventListener("focus", async () => {
             const data = await loadVerses(route.sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data));
+            showTooltip(element, sampleVerses(part.verseIds, data), part.matchLabel);
           });
           element.addEventListener("blur", hideTooltip);
         }
@@ -600,9 +674,9 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
     const displayWord = resolved.matchedWord ?? resolved.normalized;
     const verseIds = resolved.verseIds;
     const normalizationNote =
-      resolved.matchType === "normalized" && resolved.matchedWord
+      resolved.matchType === "normalized" && resolved.matchLabel
         ? `<p class="muted">Matched <code>${escapeHtml(route.word)}</code> as <code>${escapeHtml(
-            resolved.matchedWord
+            displayWord
           )}</code>.</p>`
         : "";
 
