@@ -7,7 +7,8 @@ export type SocialNetworkId =
   | "youtube"
   | "reddit"
   | "hackernews"
-  | "lobsters";
+  | "lobsters"
+  | "quora";
 
 export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   x: "X",
@@ -18,7 +19,8 @@ export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   youtube: "YouTube",
   reddit: "Reddit",
   hackernews: "Hacker News",
-  lobsters: "Lobsters"
+  lobsters: "Lobsters",
+  quora: "Quora"
 };
 
 function normalizeHost(hostname: string): string {
@@ -67,6 +69,10 @@ export function getSocialNetworkFromUrl(value: string): SocialNetworkId | null {
 
     if (host === "lobste.rs" && /^\/s\/[^/]+/.test(url.pathname)) {
       return "lobsters";
+    }
+
+    if (host === "quora.com" && url.pathname !== "/") {
+      return "quora";
     }
 
     return null;

@@ -37,6 +37,7 @@ test("supported networks are detected from canonical URLs", () => {
     getSocialNetworkFromUrl("https://lobste.rs/s/bunmdv/faster_asin_was_hiding_plain_sight#c_b2ebup"),
     "lobsters"
   );
+  assert.equal(getSocialNetworkFromUrl("https://www.quora.com/What-is-the-best-programming-language"), "quora");
 });
 
 test("unsupported URLs are rejected", () => {

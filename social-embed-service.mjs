@@ -479,6 +479,10 @@ function detectNetwork(url) {
     return "lobsters";
   }
 
+  if (host === "quora.com") {
+    return "quora";
+  }
+
   throw new SocialEmbedError(400, "Unsupported post URL.");
 }
 
@@ -659,6 +663,21 @@ function normalizeLobstersUrl(url) {
   return canonical.toString();
 }
 
+function humanizeSlug(value) {
+  return compactWhitespace(decodeURIComponent(value).replace(/[-_+]+/g, " "));
+}
+
+function normalizeQuoraUrl(url) {
+  const pathname = url.pathname.replace(/\/+$/, "");
+  const segments = pathname.split("/").filter(Boolean);
+
+  if (!segments.length) {
+    throw new SocialEmbedError(400, "Enter a Quora question URL.");
+  }
+
+  return `https://www.quora.com/${segments.join("/")}`;
+}
+
 function getRedditCommentId(url) {
   const segments = url.pathname.split("/").filter(Boolean);
   const commentsIndex = segments.indexOf("comments");
@@ -712,6 +731,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeHackerNewsUrl(url), network };
     case "lobsters":
       return { canonicalUrl: normalizeLobstersUrl(url), network };
+    case "quora":
+      return { canonicalUrl: normalizeQuoraUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -1234,6 +1255,52 @@ async function fetchLobstersEmbed(canonicalUrl, options = {}) {
   };
 }
 
+function extractQuoraContext(canonicalUrl) {
+  const url = new URL(canonicalUrl);
+  const segments = url.pathname.split("/").filter(Boolean);
+  const questionTitle = segments[0] ? humanizeSlug(segments[0]) : "";
+  const answerAuthor = segments[1] === "answer" && segments[2] ? humanizeSlug(segments[2]) : "";
+
+  return {
+    answerAuthor,
+    questionTitle
+  };
+}
+
+function buildQuoraEmbedHtml(canonicalUrl, questionTitle, answerAuthor) {
+  return buildSocialCardHtml({
+    actions: [
+      {
+        href: canonicalUrl,
+        label: "Open on Quora"
+      }
+    ],
+    canonicalUrl,
+    eyebrow: `Quora ${answerAuthor ? "answer" : "question"}`,
+    metaParts: [
+      ...(answerAuthor ? [`answer by ${answerAuthor}`] : []),
+      "question title derived from URL"
+    ],
+    networkClass: "quora",
+    previewText: "Quora blocks public server-side text extraction here, so this view uses the question title from the URL.",
+    title: questionTitle
+  });
+}
+
+async function fetchQuoraEmbed(canonicalUrl) {
+  const { answerAuthor, questionTitle } = extractQuoraContext(canonicalUrl);
+  if (!questionTitle) {
+    throw new SocialEmbedError(400, "Enter a Quora question URL.");
+  }
+
+  return {
+    canonicalUrl,
+    html: buildQuoraEmbedHtml(canonicalUrl, questionTitle, answerAuthor),
+    network: "quora",
+    text: questionTitle
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -1268,6 +1335,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchHackerNewsEmbed(canonicalUrl, options);
     case "lobsters":
       return fetchLobstersEmbed(canonicalUrl, options);
+    case "quora":
+      return fetchQuoraEmbed(canonicalUrl);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
