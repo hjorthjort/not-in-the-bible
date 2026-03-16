@@ -276,6 +276,24 @@ function combineText(...parts) {
   );
 }
 
+function truncateText(text, maxLength = 280) {
+  const normalized = compactWhitespace(text);
+  if (!normalized || normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}\u2026`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function escapeAttribute(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -374,6 +392,33 @@ function buildIframeHtml(src, title, height = 760) {
   return `<iframe src="${escapeAttribute(src)}" title="${escapeAttribute(title)}" width="100%" height="${height}" style="border:0;display:block;margin:0 auto;max-width:600px;width:100%;" loading="lazy" referrerpolicy="origin-when-cross-origin" allowfullscreen></iframe>`;
 }
 
+function extractTextFromHtmlFragment(html) {
+  if (typeof html !== "string" || !html.trim()) {
+    return "";
+  }
+
+  const normalizedHtml = html
+    .replace(/<p\b[^>]*>/gi, "\n\n")
+    .replace(/<\/p>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<(?:pre|blockquote)\b[^>]*>/gi, "\n")
+    .replace(/<\/(?:pre|blockquote)>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<\/li>/gi, "")
+    .replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_match, attributes, innerHtml) => {
+      const hrefMatch = attributes.match(/\bhref=(["'])(.*?)\1/i);
+      const visibleText = decodeHtmlEntities(stripHtml(innerHtml)).trim();
+
+      if (isLinkLikeText(visibleText, hrefMatch?.[2] ?? null)) {
+        return "[...]";
+      }
+
+      return innerHtml;
+    });
+
+  return compactWhitespace(decodeHtmlEntities(stripHtml(normalizedHtml)));
+}
+
 function buildMetaGraphOEmbedUrl(pathname, canonicalUrl, accessToken) {
   const endpoint = new URL(`https://graph.facebook.com/${META_EMBED_API_VERSION}/${pathname}`);
   endpoint.searchParams.set("url", canonicalUrl);
@@ -424,6 +469,10 @@ function detectNetwork(url) {
 
   if (host === "reddit.com" || host === "old.reddit.com") {
     return "reddit";
+  }
+
+  if (host === "news.ycombinator.com") {
+    return "hackernews";
   }
 
   throw new SocialEmbedError(400, "Unsupported post URL.");
@@ -562,6 +611,28 @@ function normalizeRedditUrl(url) {
   return `https://www.reddit.com${path}/`;
 }
 
+function getHackerNewsItemId(url) {
+  const itemId = url.searchParams.get("id")?.trim() ?? "";
+  return /^\d+$/.test(itemId) ? itemId : null;
+}
+
+function buildHackerNewsItemUrl(itemId) {
+  return `https://news.ycombinator.com/item?id=${itemId}`;
+}
+
+function normalizeHackerNewsUrl(url) {
+  if (url.pathname !== "/item") {
+    throw new SocialEmbedError(400, "Enter a Hacker News item URL.");
+  }
+
+  const itemId = getHackerNewsItemId(url);
+  if (!itemId) {
+    throw new SocialEmbedError(400, "Enter a Hacker News item URL.");
+  }
+
+  return buildHackerNewsItemUrl(itemId);
+}
+
 function getRedditCommentId(url) {
   const segments = url.pathname.split("/").filter(Boolean);
   const commentsIndex = segments.indexOf("comments");
@@ -611,6 +682,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeYouTubeUrl(url), network };
     case "reddit":
       return { canonicalUrl: normalizeRedditUrl(url), network };
+    case "hackernews":
+      return { canonicalUrl: normalizeHackerNewsUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -845,6 +918,138 @@ function buildRedditJsonUrl(canonicalUrl) {
   return `https://old.reddit.com${normalizedPath}.json?raw_json=1`;
 }
 
+function buildHackerNewsItemApiUrl(itemId) {
+  return `https://hacker-news.firebaseio.com/v0/item/${itemId}.json`;
+}
+
+async function fetchHackerNewsItem(itemId, options = {}) {
+  const payload = await fetchJson(buildHackerNewsItemApiUrl(itemId), {
+    signal: options.signal
+  });
+
+  if (!payload || typeof payload !== "object" || payload.id == null || payload.dead || payload.deleted) {
+    throw new SocialEmbedError(404, "This Hacker News item is unavailable.");
+  }
+
+  return payload;
+}
+
+async function findHackerNewsStory(item, options = {}) {
+  let current = item;
+
+  for (let depth = 0; depth < 20; depth += 1) {
+    if (!current?.parent) {
+      return current?.type === "story" ? current : null;
+    }
+
+    current = await fetchHackerNewsItem(String(current.parent), options);
+    if (current.type !== "comment") {
+      return current;
+    }
+  }
+
+  return null;
+}
+
+function getHostnameLabel(value) {
+  try {
+    return new URL(value).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
+}
+
+function buildSocialCardHtml({
+  actions = [],
+  canonicalUrl,
+  context = null,
+  eyebrow,
+  metaParts = [],
+  networkClass,
+  previewText = "",
+  title
+}) {
+  const contextHtml = context?.label
+    ? `<p class="social-card__context">${
+        context.href
+          ? `<a href="${escapeAttribute(context.href)}" target="_blank" rel="noreferrer">${escapeHtml(context.label)}</a>`
+          : escapeHtml(context.label)
+      }</p>`
+    : "";
+  const safePreview = truncateText(previewText, 320);
+  const previewHtml =
+    safePreview && safePreview.toLowerCase() !== title.toLowerCase()
+      ? `<p class="social-card__preview">${escapeHtml(safePreview)}</p>`
+      : "";
+  const actionHtml = actions
+    .filter((action) => action?.href && action?.label)
+    .map(
+      (action) =>
+        `<a class="social-card__action" href="${escapeAttribute(action.href)}" target="_blank" rel="noreferrer">${escapeHtml(action.label)}</a>`
+    )
+    .join("");
+
+  return `
+    <article class="social-card social-card--${escapeAttribute(networkClass)}">
+      <p class="social-card__eyebrow">${escapeHtml(eyebrow)}</p>
+      <h3 class="social-card__title">
+        <a href="${escapeAttribute(canonicalUrl)}" target="_blank" rel="noreferrer">${escapeHtml(title)}</a>
+      </h3>
+      ${contextHtml}
+      ${previewHtml}
+      ${metaParts.length ? `<p class="social-card__meta">${escapeHtml(metaParts.join(" · "))}</p>` : ""}
+      ${actionHtml ? `<div class="social-card__actions">${actionHtml}</div>` : ""}
+    </article>
+  `;
+}
+
+function buildHackerNewsEmbedHtml(item, canonicalUrl, bodyText, story) {
+  const isComment = item.type === "comment";
+  const storyTitle = compactWhitespace(story?.title ?? "");
+  const title = isComment ? `Comment by ${item.by ?? "unknown"}` : compactWhitespace(item.title ?? "Hacker News post");
+  const storyUrl = story?.id ? buildHackerNewsItemUrl(String(story.id)) : canonicalUrl;
+  const linkedUrl = !isComment && item.url ? item.url : story?.url ?? null;
+  const linkedHost = linkedUrl ? getHostnameLabel(linkedUrl) : "";
+  const metaParts = [];
+
+  if (item.by) {
+    metaParts.push(`by ${item.by}`);
+  }
+
+  if (!isComment && typeof item.score === "number") {
+    metaParts.push(`${item.score} points`);
+  }
+
+  const commentCount = isComment ? story?.descendants : item.descendants;
+  if (typeof commentCount === "number") {
+    metaParts.push(`${commentCount} comments`);
+  }
+
+  return buildSocialCardHtml({
+    actions: [
+      {
+        href: canonicalUrl,
+        label: "Open on Hacker News"
+      },
+      ...(linkedUrl
+        ? [
+            {
+              href: linkedUrl,
+              label: isComment ? "Open linked story" : "Open linked page"
+            }
+          ]
+        : [])
+    ],
+    canonicalUrl,
+    context: isComment ? (storyTitle ? { href: storyUrl, label: `On ${storyTitle}` } : null) : linkedHost ? { href: linkedUrl, label: linkedHost } : null,
+    eyebrow: `Hacker News ${isComment ? "comment" : "post"}`,
+    metaParts,
+    networkClass: "hackernews",
+    previewText: bodyText,
+    title
+  });
+}
+
 async function fetchRedditEmbed(canonicalUrl, options = {}) {
   const endpoint = new URL("https://www.reddit.com/oembed");
   endpoint.searchParams.set("url", canonicalUrl);
@@ -881,6 +1086,25 @@ async function fetchRedditEmbed(canonicalUrl, options = {}) {
   };
 }
 
+async function fetchHackerNewsEmbed(canonicalUrl, options = {}) {
+  const itemId = getHackerNewsItemId(new URL(canonicalUrl));
+  if (!itemId) {
+    throw new SocialEmbedError(400, "Enter a Hacker News item URL.");
+  }
+
+  const item = await fetchHackerNewsItem(itemId, options);
+  const story = item.type === "comment" ? await findHackerNewsStory(item, options) : item;
+  const bodyText = extractTextFromHtmlFragment(item.text ?? "");
+  const text = item.type === "comment" ? bodyText : combineText(item.title ?? "", bodyText);
+
+  return {
+    canonicalUrl,
+    html: buildHackerNewsEmbedHtml(item, canonicalUrl, bodyText, story),
+    network: "hackernews",
+    text
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -911,6 +1135,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchYouTubeEmbed(canonicalUrl, options);
     case "reddit":
       return fetchRedditEmbed(canonicalUrl, options);
+    case "hackernews":
+      return fetchHackerNewsEmbed(canonicalUrl, options);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
