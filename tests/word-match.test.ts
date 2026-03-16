@@ -58,3 +58,12 @@ test("does not normalize has to ha in kjv", () => {
   assert.equal(result.matchedWord, null);
   assert.deepEqual(result.matchedWords, []);
 });
+
+test("keeps verbatim has match in web instead of normalizing to ha", () => {
+  const result = resolveWordMatch("has", loadWords("web"), { enableNormalization: true });
+
+  assert.equal(result.matchType, "exact");
+  assert.equal(result.matchedWord, "has");
+  assert.deepEqual(result.matchedWords, ["has"]);
+  assert.ok(result.verseIds.length > 0);
+});
