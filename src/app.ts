@@ -332,8 +332,10 @@ async function syncSourceSelect(selectedSourceId: string): Promise<void> {
 
   for (const source of catalog.sources) {
     const option = document.createElement("option");
+    const optionLabel = source.shortName;
     option.value = source.id;
-    option.textContent = source.shortName;
+    option.label = optionLabel;
+    option.textContent = optionLabel;
     option.dataset.fullName = source.name;
     option.selected = source.id === resolvedSourceId;
     options.append(option);
