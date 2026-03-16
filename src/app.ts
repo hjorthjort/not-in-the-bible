@@ -451,6 +451,39 @@ function getRandomVerse(verseData: VersePayload): Verse {
   return verseData.verses[Math.floor(Math.random() * verseData.verses.length)];
 }
 
+function renderHighlightedVerseText(text: string, matchedWords: string[]): string {
+  if (!matchedWords.length) {
+    return escapeHtml(text);
+  }
+
+  const matchedSet = new Set(matchedWords.map((word) => normalizeWord(word)).filter(Boolean));
+  let markup = "";
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(TOKEN_PATTERN)) {
+    const [rawWord] = match;
+    const start = match.index ?? 0;
+    const end = start + rawWord.length;
+
+    if (start > lastIndex) {
+      markup += escapeHtml(text.slice(lastIndex, start));
+    }
+
+    const tokenMarkup = escapeHtml(rawWord);
+    markup += matchedSet.has(normalizeWord(rawWord))
+      ? `<mark class="tooltip__match">${tokenMarkup}</mark>`
+      : tokenMarkup;
+
+    lastIndex = end;
+  }
+
+  if (lastIndex < text.length) {
+    markup += escapeHtml(text.slice(lastIndex));
+  }
+
+  return markup;
+}
+
 async function renderErrorState({
   title,
   message,
@@ -486,7 +519,12 @@ async function renderErrorState({
   `;
 }
 
-function showTooltip(target: HTMLElement, verses: Verse[], matchLabel?: string | null): void {
+function showTooltip(
+  target: HTMLElement,
+  verses: Verse[],
+  matchedWords: string[],
+  matchLabel?: string | null
+): void {
   if (!verses.length) {
     tooltip.hidden = true;
     return;
@@ -500,7 +538,7 @@ function showTooltip(target: HTMLElement, verses: Verse[], matchLabel?: string |
         (verse) => `
           <a class="tooltip__verse" href="${verse.url}" target="_blank" rel="noreferrer">
             <strong>${escapeHtml(verse.reference)}</strong>
-            <span>${escapeHtml(verse.text)}</span>
+            <span>${renderHighlightedVerseText(verse.text, matchedWords)}</span>
           </a>
         `
       )
@@ -631,12 +669,12 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
           element.dataset.word = linkedWord;
           element.addEventListener("mouseenter", async () => {
             const data = await loadVerses(route.sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data), part.matchLabel);
+            showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
           });
           element.addEventListener("mouseleave", hideTooltip);
           element.addEventListener("focus", async () => {
             const data = await loadVerses(route.sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data), part.matchLabel);
+            showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
           });
           element.addEventListener("blur", hideTooltip);
         }
@@ -707,7 +745,7 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
               (verse) => `
                 <article class="verse-card">
                   <a href="${verse.url}" target="_blank" rel="noreferrer">${escapeHtml(verse.reference)}</a>
-                  <p>${escapeHtml(verse.text)}</p>
+                  <p>${renderHighlightedVerseText(verse.text, resolved.matchedWords)}</p>
                 </article>
               `
             )
