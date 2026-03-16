@@ -251,7 +251,7 @@ function resolveWordMatch(
         matchedWord: contractionExpansion.join(" "),
         matchedWords: contractionExpansion,
         matchType: "normalized",
-        matchLabel: `Inexact match: expanded to ${contractionExpansion.join(" ")}`,
+        matchLabel: `Inexact match: expanded to "${contractionExpansion.join(" ")}"`,
         verseIds: [...new Set(expandedVerseIds)]
       };
     }
@@ -268,7 +268,7 @@ function resolveWordMatch(
       matchedWord: candidate,
       matchedWords: [candidate],
       matchType: index === 0 ? "exact" : "normalized",
-      matchLabel: index === 0 ? null : `Inexact match: matched as ${candidate}`,
+      matchLabel: index === 0 ? null : `Inexact match: matched as "${candidate}"`,
       verseIds
     };
   }
