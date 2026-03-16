@@ -94,5 +94,6 @@ This software is licensed under the MIT License. See [LICENSE](LICENSE).
 - Instagram uses the public embed page plus best-effort text extraction. Set `META_EMBED_ACCESS_TOKEN` to enable Meta's official oEmbed path.
 - Facebook uses the public plugin embed plus best-effort text extraction. Set `META_EMBED_ACCESS_TOKEN` to enable Meta's official oEmbed path.
 - Hacker News uses the public item API plus a custom card embed for posts and comments.
+- Lobsters uses the public story JSON plus a custom card embed for stories and comment anchors.
 - Reddit augments the oEmbed title with the post selftext when the public JSON endpoint is available.
 - Build output writes `data/sources.json` plus per-source `words.json`, `verses.json`, and `meta.json` files under `data/<source-id>/`, then assembles the deployable site in `out/`.

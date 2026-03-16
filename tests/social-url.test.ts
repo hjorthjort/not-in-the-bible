@@ -32,6 +32,11 @@ test("supported networks are detected from canonical URLs", () => {
   assert.equal(getSocialNetworkFromUrl("https://www.reddit.com/r/funny/comments/3g1jfi/buttons/ctu0ltr/"), "reddit");
   assert.equal(getSocialNetworkFromUrl("https://news.ycombinator.com/item?id=8863"), "hackernews");
   assert.equal(getSocialNetworkFromUrl("https://news.ycombinator.com/item?id=2921983"), "hackernews");
+  assert.equal(getSocialNetworkFromUrl("https://lobste.rs/s/bunmdv/faster_asin_was_hiding_plain_sight"), "lobsters");
+  assert.equal(
+    getSocialNetworkFromUrl("https://lobste.rs/s/bunmdv/faster_asin_was_hiding_plain_sight#c_b2ebup"),
+    "lobsters"
+  );
 });
 
 test("unsupported URLs are rejected", () => {
