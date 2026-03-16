@@ -3,40 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>None Of These Words Are In The Bible</title>
+    <title>Redirecting | None Of These Words Are In The Bible</title>
     <meta
       name="description"
-      content="Paste a tweet link and check which words appear in the Bible."
+      content="Static fallback page for tweet and word deep links."
     />
     <link rel="stylesheet" href="/styles.css" />
+    <script>
+      (function () {
+        var requestedPath = window.location.pathname + window.location.search + window.location.hash;
+        if (requestedPath === "/404.html") {
+          return;
+        }
+
+        var redirectTarget = new URL("/", window.location.origin);
+        redirectTarget.searchParams.set("__redirect", requestedPath);
+        window.location.replace(redirectTarget.toString());
+      })();
+    </script>
   </head>
   <body>
     <div class="page-shell">
       <header class="hero">
         <a class="hero__home" href="/">None Of These Words Are In The Bible</a>
         <p class="hero__kicker">boomerslop verifier</p>
-        <form id="tweet-form" class="tweet-form" autocomplete="off">
-          <label class="select-wrap" for="bible-source">
-            <span class="sr-only">Bible source</span>
-            <select id="bible-source" name="bible-source"></select>
-          </label>
-          <label class="sr-only" for="tweet-url">Tweet URL</label>
-          <input
-            id="tweet-url"
-            name="tweet-url"
-            type="url"
-            placeholder="https://x.com/user/status/1234567890"
-            required
-          />
-          <button type="submit">Analyze</button>
-        </form>
       </header>
 
-      <main id="app" class="app-shell" aria-live="polite"></main>
+      <main class="app-shell" aria-live="polite">
+        <section class="panel panel--error">
+          <p class="error-code">Static redirect</p>
+          <h1>Finding that page…</h1>
+          <p>If JavaScript is enabled, this host should redirect you to the matching app route automatically.</p>
+        </section>
+      </main>
     </div>
-
-    <div id="tooltip" class="tooltip" hidden></div>
-    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-    <script type="module" src="/dist/app.js"></script>
   </body>
 </html>

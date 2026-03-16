@@ -31,7 +31,7 @@ Static site for checking whether words in a public tweet appear in different Bib
 
 3. Open `http://localhost:4173`.
 
-The local server intentionally serves the custom `404.html` for unknown paths so hard-refreshing deep links like `/:username/status/:statusId` works during development too.
+The local server intentionally serves the custom `404.html` for unknown paths so hard-refreshing deep links like `/:username/status/:statusId` works during development too, and the static fallback redirects those requests back into the app shell.
 
 ## Bible Source
 

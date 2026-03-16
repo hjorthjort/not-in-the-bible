@@ -18,6 +18,7 @@ const sourceSelect = sourceSelectElement;
 
 const TOKEN_PATTERN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
 const DEFAULT_SOURCE_ID = "kjv";
+const REDIRECT_PARAM = "__redirect";
 
 type Verse = {
   id: number;
@@ -540,6 +541,22 @@ function parsePath(pathname: string, search = window.location.search): Route {
   return { type: "home", sourceId: requestedSourceId };
 }
 
+function restoreRedirectedPath(): void {
+  const url = new URL(window.location.href);
+  const redirectedPath = url.searchParams.get(REDIRECT_PARAM);
+
+  if (!redirectedPath) {
+    return;
+  }
+
+  const restored = new URL(redirectedPath, window.location.origin);
+  if (restored.origin !== window.location.origin) {
+    return;
+  }
+
+  window.history.replaceState({}, "", `${restored.pathname}${restored.search}${restored.hash}`);
+}
+
 async function renderRoute(): Promise<void> {
   hideTooltip();
   const route = parsePath(window.location.pathname, window.location.search);
@@ -607,4 +624,5 @@ window.addEventListener("popstate", () => {
 window.addEventListener("scroll", hideTooltip, { passive: true });
 window.addEventListener("resize", hideTooltip);
 
+restoreRedirectedPath();
 void renderRoute();

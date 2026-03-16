@@ -1,3 +1,3 @@
-import { copyFileSync } from "node:fs";
+import { accessSync, constants } from "node:fs";
 
-copyFileSync("index.html", "404.html");
+accessSync("404.html", constants.F_OK);
