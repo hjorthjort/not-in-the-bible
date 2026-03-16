@@ -181,12 +181,12 @@ code {
   text-align: center;
 }
 
-.tweet-embed {
+.post-embed {
   display: flex;
   justify-content: center;
 }
 
-.tweet-text {
+.post-text {
   font-size: clamp(1.2rem, 2vw, 1.6rem);
   line-height: 1.9;
   white-space: break-spaces;

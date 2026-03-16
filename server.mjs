@@ -2,6 +2,7 @@ import { createReadStream, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, join, normalize } from "node:path";
+import { fetchSocialEmbed, SocialEmbedError } from "./social-embed-service.mjs";
 
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = process.cwd();
@@ -22,6 +23,11 @@ function sendFile(response, filePath, statusCode = 200) {
   createReadStream(filePath).pipe(response);
 }
 
+function sendJson(response, payload, statusCode = 200) {
+  response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(payload));
+}
+
 function resolvePath(pathname) {
   const decodedPath = decodeURIComponent(pathname);
   const normalizedPath = normalize(decodedPath).replace(/^(\.\.[/\\])+/, "");
@@ -36,6 +42,32 @@ function resolvePath(pathname) {
 
 createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+
+  if (url.pathname === "/api/embed") {
+    const postUrl = url.searchParams.get("url");
+    if (!postUrl) {
+      sendJson(response, { error: "Missing required url parameter." }, 400);
+      return;
+    }
+
+    try {
+      const payload = await fetchSocialEmbed(postUrl, {
+        env: process.env,
+        signal: request.signal
+      });
+      sendJson(response, payload);
+      return;
+    } catch (error) {
+      if (error instanceof SocialEmbedError) {
+        sendJson(response, { error: error.message }, error.status);
+        return;
+      }
+
+      sendJson(response, { error: "Could not load that post." }, 500);
+      return;
+    }
+  }
+
   const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
   const candidatePath = resolvePath(pathname);
 

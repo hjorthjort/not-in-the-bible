@@ -1,9 +1,9 @@
 export {};
 
-import { buildAnalyzedText, resolveWordMatch } from "./lib/word-match.js";
 import { renderHighlightedVerseText } from "./lib/verse-highlight.js";
+import { SOCIAL_NETWORK_LABELS, type SocialNetworkId, isSupportedSocialUrl } from "./lib/social-url.js";
 import { sortVersesByBibleOrder } from "./lib/verse-order.js";
-import { extractTweetTextFromHtml } from "./lib/tweet-analysis.js";
+import { buildAnalyzedText, resolveWordMatch } from "./lib/word-match.js";
 
 const appElement = document.querySelector<HTMLElement>("#app");
 const formElement = document.querySelector<HTMLFormElement>("#tweet-form");
@@ -34,6 +34,7 @@ const sourceName = sourceNameElement;
 const sourceShort = sourceShortElement;
 
 const DEFAULT_SOURCE_ID = "kjv";
+const POST_URL_PARAM = "url";
 const REDIRECT_PARAM = "__redirect";
 const DEFAULT_APP_CONFIG: AppConfig = {
   enableWordNormalization: true
@@ -86,12 +87,14 @@ type VersePayload = {
 
 type Route =
   | { type: "home"; sourceId: string }
-  | { type: "tweet"; username: string; statusId: string; canonicalUrl: string; sourceId: string }
+  | { type: "post"; socialUrl: string; sourceId: string }
   | { type: "word"; word: string; sourceId: string }
   | { type: "notFound"; sourceId: string };
 
-type TweetEmbed = {
+type SocialEmbed = {
+  canonicalUrl: string;
   html: string;
+  network: SocialNetworkId;
   text: string;
 };
 
@@ -99,9 +102,18 @@ type AppConfig = {
   enableWordNormalization: boolean;
 };
 
+type EmbeddedScript = {
+  async: boolean;
+  charset: string | null;
+  src: string;
+};
+
 declare global {
   interface Window {
     __APP_CONFIG__?: Partial<AppConfig>;
+    bluesky?: {
+      scan: (element?: ParentNode) => void;
+    };
     twttr?: {
       widgets?: {
         load: (element?: Element | null) => void;
@@ -121,6 +133,8 @@ const dataState: {
   wordsBySource: new Map(),
   versesBySource: new Map()
 };
+
+const scriptPromises = new Map<string, Promise<void>>();
 
 const escapeHtml = (value: string): string =>
   value
@@ -154,28 +168,52 @@ function resolveSourceId(catalog: SourceCatalog, requestedSourceId: string | nul
   return catalog.defaultSourceId;
 }
 
-function parseTweetUrl(value: string): { username: string; statusId: string; canonicalUrl: string } | null {
-  try {
-    const url = new URL(value.trim());
-    const host = url.hostname.replace(/^www\./, "");
-    if (!["x.com", "twitter.com"].includes(host)) {
-      return null;
-    }
-
-    const match = url.pathname.match(/^\/([^/]+)\/status\/(\d+)/);
-    if (!match) {
-      return null;
-    }
-
-    const [, username, statusId] = match;
-    return {
-      username,
-      statusId,
-      canonicalUrl: `https://x.com/${username}/status/${statusId}`
-    };
-  } catch {
+function parseLegacyXPath(pathname: string): string | null {
+  const match = pathname.match(/^\/([^/]+)\/status\/(\d+)\/?$/);
+  if (!match) {
     return null;
   }
+
+  const [, username, statusId] = match;
+  return `https://x.com/${username}/status/${statusId}`;
+}
+
+function persistSourceId(sourceId: string): void {
+  localStorage.setItem("preferredBibleSource", sourceId);
+}
+
+function buildSearch(
+  sourceId: string,
+  extraParams: Record<string, string | null | undefined> = {}
+): string {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(extraParams)) {
+    if (value) {
+      params.set(key, value);
+    }
+  }
+
+  if (sourceId && sourceId !== DEFAULT_SOURCE_ID) {
+    params.set("source", sourceId);
+  }
+
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+
+function buildPostHref(postUrl: string, sourceId: string): string {
+  return `/post${buildSearch(sourceId, { [POST_URL_PARAM]: postUrl })}`;
+}
+
+function navigate(
+  pathname: string,
+  sourceId = sourceSelect.value || DEFAULT_SOURCE_ID,
+  extraParams: Record<string, string | null | undefined> = {}
+): void {
+  persistSourceId(sourceId);
+  window.history.pushState({}, "", `${pathname}${buildSearch(sourceId, extraParams)}`);
+  void renderRoute();
 }
 
 async function loadSourceCatalog(): Promise<SourceCatalog> {
@@ -329,14 +367,11 @@ function hideTooltip(): void {
 function renderHome(): void {
   app.innerHTML = `
     <section class="panel">
-      <h1>Paste a tweet URL</h1>
+      <h1>Paste a post URL</h1>
       <p>
-        Public tweet links from <code>x.com</code> or <code>twitter.com</code> are supported.
-        The app embeds the tweet, extracts the visible tweet text, and checks each word against the selected local Bible index.
+        Public post links from supported networks are embedded and checked against the selected local Bible index.
       </p>
-      <p class="muted">
-        If X refuses to return embed data for a tweet, this static version cannot recover it server-side.
-      </p>
+      <p class="muted">Legacy X status paths still work and redirect into the new post view.</p>
     </section>
   `;
 }
@@ -372,113 +407,230 @@ async function syncSourceSelect(selectedSourceId: string): Promise<void> {
   sourceSelect.title = selectedSourceName;
 }
 
-async function fetchTweetEmbed(tweetUrl: string): Promise<TweetEmbed> {
-  const endpoint = new URL("https://publish.twitter.com/oembed");
-  endpoint.searchParams.set("url", tweetUrl);
-  endpoint.searchParams.set("omit_script", "1");
-  endpoint.searchParams.set("dnt", "true");
-  endpoint.searchParams.set("align", "center");
+async function fetchSocialEmbed(postUrl: string): Promise<SocialEmbed> {
+  const endpoint = new URL("/api/embed", window.location.origin);
+  endpoint.searchParams.set("url", postUrl);
 
   const response = await fetch(endpoint);
   if (!response.ok) {
-    throw new Error(`Tweet lookup failed with ${response.status}.`);
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? `Post lookup failed with ${response.status}.`);
   }
 
-  const payload = (await response.json()) as { html: string };
-  const text = extractTweetTextFromHtml(payload.html);
+  return (await response.json()) as SocialEmbed;
+}
+
+function splitEmbedHtml(html: string): { markup: string; scripts: EmbeddedScript[] } {
+  const scripts: EmbeddedScript[] = [];
+  const markup = html.replace(/<script\b([^>]*)>(?:[\s\S]*?)<\/script>/gi, (_match, attributes) => {
+    const srcMatch = attributes.match(/\bsrc=(["'])(.*?)\1/i);
+    if (!srcMatch?.[2]) {
+      return "";
+    }
+
+    const charsetMatch = attributes.match(/\bcharset=(["'])(.*?)\1/i);
+    scripts.push({
+      async: /\basync\b/i.test(attributes),
+      charset: charsetMatch?.[2] ?? null,
+      src: srcMatch[2]
+    });
+    return "";
+  });
 
   return {
-    html: payload.html,
-    text
+    markup,
+    scripts
   };
 }
 
-async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promise<void> {
+async function loadScriptOnce(src: string, charset: string | null = null): Promise<void> {
+  const cached = scriptPromises.get(src);
+  if (cached) {
+    return cached;
+  }
+
+  const promise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${CSS.escape(src)}"]`);
+    if (existing) {
+      resolve();
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    if (charset) {
+      script.charset = charset;
+    }
+    script.addEventListener("load", () => resolve(), { once: true });
+    script.addEventListener("error", () => reject(new Error(`Failed to load ${src}`)), { once: true });
+    document.head.append(script);
+  });
+
+  scriptPromises.set(src, promise);
+  return promise;
+}
+
+async function executeEmbedScript(script: EmbeddedScript): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const element = document.createElement("script");
+    element.src = script.src;
+    element.async = script.async;
+    if (script.charset) {
+      element.charset = script.charset;
+    }
+    element.addEventListener(
+      "load",
+      () => {
+        element.remove();
+        resolve();
+      },
+      { once: true }
+    );
+    element.addEventListener(
+      "error",
+      () => {
+        element.remove();
+        reject(new Error(`Failed to execute ${script.src}`));
+      },
+      { once: true }
+    );
+    document.body.append(element);
+  });
+}
+
+async function mountPostEmbed(container: HTMLElement, embed: SocialEmbed): Promise<void> {
+  const { markup, scripts } = splitEmbedHtml(embed.html);
+  container.innerHTML = markup;
+
+  if (embed.network === "x") {
+    await loadScriptOnce("https://platform.twitter.com/widgets.js", "utf-8");
+    window.twttr?.widgets?.load(container);
+    return;
+  }
+
+  if (embed.network === "bluesky" && window.bluesky?.scan) {
+    window.bluesky.scan(container);
+    return;
+  }
+
+  for (const script of scripts) {
+    if (embed.network === "bluesky") {
+      await loadScriptOnce(script.src, script.charset);
+      window.bluesky?.scan?.(container);
+      continue;
+    }
+
+    await executeEmbedScript(script);
+  }
+}
+
+function renderAnalyzedText(
+  container: HTMLElement,
+  text: string,
+  sourceId: string,
+  wordLookup: Record<string, number[]>
+): void {
+  const analyzed = buildAnalyzedText(text, wordLookup, wordMatchOptions);
+  const fragment = document.createDocumentFragment();
+
+  for (const part of analyzed) {
+    if (part.type === "text") {
+      fragment.append(document.createTextNode(part.value));
+      continue;
+    }
+
+    const element = document.createElement(part.inBible ? "a" : "span");
+    element.className = part.inBible ? "word word--present" : "word word--missing";
+    if (part.matchType === "normalized") {
+      element.classList.add("word--normalized");
+      element.title = part.matchLabel ?? "Inexact match";
+    }
+    element.textContent = part.rawWord;
+
+    if (part.inBible && element instanceof HTMLAnchorElement) {
+      const linkedWord = part.matchedWords.length === 1 ? part.matchedWords[0] : part.normalized;
+      element.href = `/word/${encodeURIComponent(linkedWord)}?source=${encodeURIComponent(sourceId)}`;
+      element.dataset.word = linkedWord;
+      element.addEventListener("mouseenter", async () => {
+        const data = await loadVerses(sourceId);
+        showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
+      });
+      element.addEventListener("mouseleave", hideTooltip);
+      element.addEventListener("focus", async () => {
+        const data = await loadVerses(sourceId);
+        showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
+      });
+      element.addEventListener("blur", hideTooltip);
+    }
+
+    fragment.append(element);
+  }
+
+  container.replaceChildren(fragment);
+}
+
+async function renderPostRoute(route: Extract<Route, { type: "post" }>): Promise<void> {
   const catalog = await loadSourceCatalog();
   const sourceId = resolveSourceId(catalog, route.sourceId);
   await syncSourceSelect(sourceId);
-  input.value = route.canonicalUrl;
+  input.value = route.socialUrl;
   app.innerHTML = `
     <section class="panel loading">
-      <p>Loading tweet and Bible index…</p>
+      <p>Loading post and Bible index…</p>
     </section>
   `;
 
   try {
-    const [tweet, bibleData] = await Promise.all([
-      fetchTweetEmbed(route.canonicalUrl),
+    const [embed, bibleData] = await Promise.all([
+      fetchSocialEmbed(route.socialUrl),
       loadWordIndex(sourceId)
     ]);
 
-    const text = tweet.text;
-    const analyzed = buildAnalyzedText(text, bibleData.words, wordMatchOptions);
+    const analyzed = buildAnalyzedText(embed.text, bibleData.words, wordMatchOptions);
     const inBibleCount = analyzed.filter((part) => part.type === "word" && part.inBible).length;
     const missingCount = analyzed.filter((part) => part.type === "word" && !part.inBible).length;
+    const networkLabel = SOCIAL_NETWORK_LABELS[embed.network];
 
     app.innerHTML = `
       <section class="panel">
         <div class="stats">
           <span>${escapeHtml(bibleData.source.shortName)}</span>
+          <span>${escapeHtml(networkLabel)}</span>
           <span>${inBibleCount} words in the Bible</span>
           <span>${missingCount} words not in the Bible</span>
         </div>
         ${
-          text
-            ? `<p class="tweet-text" id="tweet-text"></p>`
-            : `<p class="muted">The embed loaded, but the tweet text could not be extracted from the oEmbed HTML.</p>`
+          embed.text
+            ? `<p class="post-text" id="post-text"></p>`
+            : `<p class="muted">The embed loaded, but no public text could be extracted from this post.</p>`
         }
       </section>
       <section class="panel">
-        <div id="tweet-embed" class="tweet-embed">${tweet.html}</div>
+        <div id="post-embed" class="post-embed"></div>
       </section>
     `;
 
-    const textContainer = document.querySelector<HTMLElement>("#tweet-text");
+    const textContainer = document.querySelector<HTMLElement>("#post-text");
     if (textContainer) {
-      const fragment = document.createDocumentFragment();
-
-      for (const part of analyzed) {
-        if (part.type === "text") {
-          fragment.append(document.createTextNode(part.value));
-          continue;
-        }
-
-        const element = document.createElement(part.inBible ? "a" : "span");
-        element.className = part.inBible ? "word word--present" : "word word--missing";
-        if (part.matchType === "normalized") {
-          element.classList.add("word--normalized");
-          element.title = part.matchLabel ?? "Inexact match";
-        }
-        element.textContent = part.rawWord;
-
-        if (part.inBible && element instanceof HTMLAnchorElement) {
-          const linkedWord =
-            part.matchedWords.length === 1 ? part.matchedWords[0] : part.normalized;
-          element.href = `/word/${encodeURIComponent(linkedWord)}?source=${encodeURIComponent(sourceId)}`;
-          element.dataset.word = linkedWord;
-          element.addEventListener("mouseenter", async () => {
-            const data = await loadVerses(sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
-          });
-          element.addEventListener("mouseleave", hideTooltip);
-          element.addEventListener("focus", async () => {
-            const data = await loadVerses(sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
-          });
-          element.addEventListener("blur", hideTooltip);
-        }
-
-        fragment.append(element);
-      }
-
-      textContainer.replaceChildren(fragment);
+      renderAnalyzedText(textContainer, embed.text, sourceId, bibleData.words);
     }
 
-    window.twttr?.widgets?.load(document.querySelector("#tweet-embed"));
-  } catch {
+    const embedContainer = document.querySelector<HTMLElement>("#post-embed");
+    if (embedContainer) {
+      await mountPostEmbed(embedContainer, embed);
+    }
+
+    input.value = embed.canonicalUrl;
+    if (window.location.pathname === "/post" && embed.canonicalUrl !== route.socialUrl) {
+      persistSourceId(sourceId);
+      window.history.replaceState({}, "", buildPostHref(embed.canonicalUrl, sourceId));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not load that post.";
     await renderErrorState({
-      title: "Couldn't find tweet",
-      message: "Couldn't find tweet",
+      title: "Couldn't load post",
+      message,
       sourceId
     });
   }
@@ -495,10 +647,7 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
   `;
 
   try {
-    const [wordData, verseData] = await Promise.all([
-      loadWordIndex(sourceId),
-      loadVerses(sourceId)
-    ]);
+    const [wordData, verseData] = await Promise.all([loadWordIndex(sourceId), loadVerses(sourceId)]);
     const resolved = resolveWordMatch(route.word, wordData.words, wordMatchOptions);
     const displayWord = resolved.matchedWord ?? resolved.normalized;
     const verseIds = resolved.verseIds;
@@ -559,14 +708,21 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
 function parsePath(pathname: string, search = window.location.search): Route {
   const params = new URLSearchParams(search);
   const requestedSourceId = params.get("source") || localStorage.getItem("preferredBibleSource") || DEFAULT_SOURCE_ID;
-  const tweetMatch = pathname.match(/^\/([^/]+)\/status\/(\d+)\/?$/);
-  if (tweetMatch) {
-    const [, username, statusId] = tweetMatch;
+  const postUrl = params.get(POST_URL_PARAM);
+
+  if (pathname === "/post" && postUrl) {
     return {
-      type: "tweet",
-      username,
-      statusId,
-      canonicalUrl: `https://x.com/${username}/status/${statusId}`,
+      type: "post",
+      socialUrl: postUrl,
+      sourceId: requestedSourceId
+    };
+  }
+
+  const legacyXUrl = parseLegacyXPath(pathname);
+  if (legacyXUrl) {
+    return {
+      type: "post",
+      socialUrl: legacyXUrl,
       sourceId: requestedSourceId
     };
   }
@@ -610,8 +766,8 @@ async function renderRoute(): Promise<void> {
   const sourceId = resolveSourceId(catalog, route.sourceId);
   await syncSourceSelect(sourceId);
 
-  if (route.type === "tweet") {
-    await renderTweetRoute({ ...route, sourceId });
+  if (route.type === "post") {
+    await renderPostRoute({ ...route, sourceId });
     return;
   }
 
@@ -632,24 +788,17 @@ async function renderRoute(): Promise<void> {
   renderHome();
 }
 
-function navigate(pathname: string, sourceId = sourceSelect.value || DEFAULT_SOURCE_ID): void {
-  const search = sourceId && sourceId !== DEFAULT_SOURCE_ID ? `?source=${encodeURIComponent(sourceId)}` : "";
-  localStorage.setItem("preferredBibleSource", sourceId);
-  window.history.pushState({}, "", `${pathname}${search}`);
-  void renderRoute();
-}
-
 form.addEventListener("submit", (event) => {
   event.preventDefault();
-  const parsed = parseTweetUrl(input.value);
-  if (!parsed) {
-    input.setCustomValidity("Enter a public x.com or twitter.com status URL.");
+  const submittedUrl = input.value.trim();
+  if (!isSupportedSocialUrl(submittedUrl)) {
+    input.setCustomValidity("Enter a supported public post URL.");
     input.reportValidity();
     return;
   }
 
   input.setCustomValidity("");
-  navigate(`/${parsed.username}/status/${parsed.statusId}`, sourceSelect.value || DEFAULT_SOURCE_ID);
+  navigate("/post", sourceSelect.value || DEFAULT_SOURCE_ID, { [POST_URL_PARAM]: submittedUrl });
 });
 
 document.addEventListener("click", (event) => {
@@ -665,19 +814,27 @@ document.addEventListener("click", (event) => {
 
   const url = new URL(link.href);
   event.preventDefault();
-  const nextSourceId = url.searchParams.get("source") || sourceSelect.value || DEFAULT_SOURCE_ID;
-  navigate(url.pathname, nextSourceId);
+  window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  void renderRoute();
 });
 
 sourceSelect.addEventListener("change", () => {
   const selectedOption = sourceSelect.selectedOptions.item(0);
   const selectedSourceName = selectedOption?.dataset.fullName ?? "";
   const selectedSourceShortName = selectedOption?.dataset.shortName ?? "";
+  const nextSourceId = sourceSelect.value || DEFAULT_SOURCE_ID;
+
   sourceName.textContent = selectedSourceName;
   sourceShort.textContent = selectedSourceShortName;
   sourceSelect.title = selectedSourceName;
+
   const route = parsePath(window.location.pathname, window.location.search);
-  navigate(window.location.pathname, sourceSelect.value || route.sourceId || DEFAULT_SOURCE_ID);
+  if (route.type === "post") {
+    navigate("/post", nextSourceId, { [POST_URL_PARAM]: route.socialUrl });
+    return;
+  }
+
+  navigate(window.location.pathname, nextSourceId);
 });
 
 window.addEventListener("popstate", () => {
