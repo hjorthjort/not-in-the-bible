@@ -200,6 +200,10 @@ function pickBestMetaText(network, html) {
       continue;
     }
 
+    if (network === "threads" && /^join threads to share ideas/i.test(normalized)) {
+      continue;
+    }
+
     return normalized;
   }
 
@@ -269,6 +273,10 @@ function detectNetwork(url) {
     return "facebook";
   }
 
+  if (host === "threads.net" || host === "threads.com") {
+    return "threads";
+  }
+
   throw new SocialEmbedError(400, "Unsupported post URL.");
 }
 
@@ -316,6 +324,16 @@ function normalizeFacebookUrl(url) {
   return normalized.toString();
 }
 
+function normalizeThreadsUrl(url) {
+  const match = url.pathname.match(/^\/@([^/]+)\/post\/([^/]+)/);
+  if (!match) {
+    throw new SocialEmbedError(400, "Enter a Threads post URL.");
+  }
+
+  const [, username, postId] = match;
+  return `https://www.threads.net/@${username}/post/${postId}`;
+}
+
 function normalizeCanonicalUrl(url) {
   const network = detectNetwork(url);
 
@@ -328,6 +346,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeInstagramUrl(url), network };
     case "facebook":
       return { canonicalUrl: normalizeFacebookUrl(url), network };
+    case "threads":
+      return { canonicalUrl: normalizeThreadsUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -458,6 +478,27 @@ async function fetchFacebookEmbed(canonicalUrl, env, options = {}) {
   };
 }
 
+async function fetchThreadsEmbed(canonicalUrl, options = {}) {
+  const embedUrl = `${canonicalUrl.replace(/\/$/, "")}/embed`;
+  let text = "";
+
+  try {
+    const embedHtml = await fetchText(embedUrl, {
+      signal: options.signal
+    });
+    text = pickBestMetaText("threads", embedHtml);
+  } catch {
+    text = "";
+  }
+
+  return {
+    canonicalUrl,
+    html: buildIframeHtml(embedUrl, "Threads post", 760),
+    network: "threads",
+    text
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -482,6 +523,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchInstagramEmbed(canonicalUrl, options.env, options);
     case "facebook":
       return fetchFacebookEmbed(canonicalUrl, options.env, options);
+    case "threads":
+      return fetchThreadsEmbed(canonicalUrl, options);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
