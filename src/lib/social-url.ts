@@ -5,7 +5,9 @@ export type SocialNetworkId =
   | "facebook"
   | "tiktok"
   | "youtube"
-  | "reddit";
+  | "reddit"
+  | "hackernews"
+  | "github";
 
 export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   x: "X",
@@ -14,7 +16,9 @@ export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   facebook: "Facebook",
   tiktok: "TikTok",
   youtube: "YouTube",
-  reddit: "Reddit"
+  reddit: "Reddit",
+  hackernews: "Hacker News",
+  github: "GitHub"
 };
 
 function normalizeHost(hostname: string): string {
@@ -52,6 +56,17 @@ export function getSocialNetworkFromUrl(value: string): SocialNetworkId | null {
 
     if (host === "reddit.com" || host === "old.reddit.com") {
       return "reddit";
+    }
+
+    if (host === "news.ycombinator.com") {
+      const itemId = url.searchParams.get("id")?.trim() ?? "";
+      if (url.pathname === "/item" && /^\d+$/.test(itemId)) {
+        return "hackernews";
+      }
+    }
+
+    if (host === "github.com" && /^\/[^/]+\/[^/]+\/(?:issues|pull)\/\d+/.test(url.pathname)) {
+      return "github";
     }
 
     return null;
