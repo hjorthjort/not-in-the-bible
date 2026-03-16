@@ -1,6 +1,7 @@
 export {};
 
 import { renderHighlightedVerseText } from "./lib/verse-highlight.js";
+import { getPreferredVerseUrl } from "./lib/bible-reader-url.js";
 import { SOCIAL_NETWORK_LABELS, type SocialNetworkId, isSupportedSocialUrl } from "./lib/social-url.js";
 import { sortVersesByBibleOrder } from "./lib/verse-order.js";
 import { buildAnalyzedText, resolveWordMatch } from "./lib/word-match.js";
@@ -686,7 +687,16 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
             .map(
               (verse) => `
                 <article class="verse-card">
-                  <a href="${verse.url}" target="_blank" rel="noreferrer">${escapeHtml(verse.reference)}</a>
+                  <a
+                    href="${getPreferredVerseUrl({
+                      bookCode: verse.bookCode,
+                      chapter: verse.chapter,
+                      verse: verse.verse,
+                      fallbackUrl: verse.url
+                    })}"
+                    target="_blank"
+                    rel="noreferrer"
+                  >${escapeHtml(verse.reference)}</a>
                   <p>${renderHighlightedVerseText(verse.text, resolved.matchedWords)}</p>
                 </article>
               `
