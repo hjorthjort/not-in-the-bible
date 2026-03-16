@@ -43,6 +43,21 @@ function stripHtml(value: string): string {
   return value.replace(/<[^>]+>/g, "");
 }
 
+function shouldCollapseAnchorText(text: string, href: string | null): boolean {
+  const normalizedText = text.trim().toLowerCase();
+  const normalizedHref = href?.trim().toLowerCase() ?? "";
+
+  if (!normalizedText) {
+    return false;
+  }
+
+  if (/^(?:https?:\/\/|www\.)/.test(normalizedText)) {
+    return true;
+  }
+
+  return Boolean(normalizedHref && normalizedText === normalizedHref);
+}
+
 export function normalizeWord(word: string): string {
   return word
     .normalize("NFKD")
@@ -51,9 +66,9 @@ export function normalizeWord(word: string): string {
     .toLowerCase();
 }
 
-export function extractTweetTextFromHtml(html: string): string {
-  const paragraphMatch = html.match(/<blockquote\b[^>]*>[\s\S]*?<p\b[^>]*>([\s\S]*?)<\/p>/i);
-  const paragraphHtml = paragraphMatch?.[1] ?? "";
+export function extractSocialTextFromHtml(html: string): string {
+  const paragraphMatches = [...html.matchAll(/<blockquote\b[^>]*>[\s\S]*?<p\b[^>]*>([\s\S]*?)<\/p>/gi)];
+  const paragraphHtml = paragraphMatches.map((match) => match[1]).join("\n\n");
 
   if (!paragraphHtml) {
     return "";
@@ -62,10 +77,21 @@ export function extractTweetTextFromHtml(html: string): string {
   const normalizedHtml = paragraphHtml
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<img\b[^>]*>/gi, "[...]")
-    .replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, "[...]");
+    .replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_match, attributes, innerHtml) => {
+      const hrefMatch = attributes.match(/\bhref=(["'])(.*?)\1/i);
+      const visibleText = decodeHtmlEntities(stripHtml(innerHtml)).trim();
+
+      if (shouldCollapseAnchorText(visibleText, hrefMatch?.[2] ?? null)) {
+        return "[...]";
+      }
+
+      return innerHtml;
+    });
 
   return decodeHtmlEntities(stripHtml(normalizedHtml)).trim();
 }
+
+export const extractTweetTextFromHtml = extractSocialTextFromHtml;
 
 export function buildAnalyzedText(
   text: string,
