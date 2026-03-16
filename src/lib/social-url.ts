@@ -1,11 +1,12 @@
-export type SocialNetworkId = "x" | "instagram" | "bluesky" | "facebook" | "threads";
+export type SocialNetworkId = "x" | "instagram" | "bluesky" | "facebook" | "threads" | "tiktok";
 
 export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   x: "X",
   instagram: "Instagram",
   bluesky: "Bluesky",
   facebook: "Facebook",
-  threads: "Threads"
+  threads: "Threads",
+  tiktok: "TikTok"
 };
 
 function normalizeHost(hostname: string): string {
@@ -35,6 +36,10 @@ export function getSocialNetworkFromUrl(value: string): SocialNetworkId | null {
 
     if (host === "threads.net" || host === "threads.com") {
       return "threads";
+    }
+
+    if (host === "tiktok.com") {
+      return "tiktok";
     }
 
     return null;

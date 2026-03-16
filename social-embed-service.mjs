@@ -124,6 +124,21 @@ function compactWhitespace(value) {
     .trim();
 }
 
+function isLinkLikeText(text, href) {
+  const normalizedText = text.trim().toLowerCase();
+  const normalizedHref = href?.trim().toLowerCase() ?? "";
+
+  if (!normalizedText) {
+    return false;
+  }
+
+  if (/^(?:https?:\/\/|www\.)/.test(normalizedText)) {
+    return true;
+  }
+
+  return Boolean(normalizedHref && normalizedText === normalizedHref);
+}
+
 function extractSocialTextFromHtml(html) {
   const paragraphMatches = [...html.matchAll(/<blockquote\b[^>]*>[\s\S]*?<p\b[^>]*>([\s\S]*?)<\/p>/gi)];
   const paragraphHtml = paragraphMatches.map((match) => match[1]).join("\n\n");
@@ -135,7 +150,16 @@ function extractSocialTextFromHtml(html) {
   const normalizedHtml = paragraphHtml
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<img\b[^>]*>/gi, "[...]")
-    .replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, "[...]");
+    .replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_match, attributes, innerHtml) => {
+      const hrefMatch = attributes.match(/\bhref=(["'])(.*?)\1/i);
+      const visibleText = decodeHtmlEntities(stripHtml(innerHtml)).trim();
+
+      if (isLinkLikeText(visibleText, hrefMatch?.[2] ?? null)) {
+        return "[...]";
+      }
+
+      return innerHtml;
+    });
 
   return compactWhitespace(decodeHtmlEntities(stripHtml(normalizedHtml)));
 }
@@ -210,6 +234,24 @@ function pickBestMetaText(network, html) {
   return "";
 }
 
+function combineText(...parts) {
+  const seen = new Set();
+  return compactWhitespace(
+    parts
+      .map((part) => (part ?? "").trim())
+      .filter(Boolean)
+      .filter((part) => {
+        const key = part.toLowerCase();
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      })
+      .join("\n\n")
+  );
+}
+
 function escapeAttribute(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -277,6 +319,10 @@ function detectNetwork(url) {
     return "threads";
   }
 
+  if (host === "tiktok.com") {
+    return "tiktok";
+  }
+
   throw new SocialEmbedError(400, "Unsupported post URL.");
 }
 
@@ -334,6 +380,16 @@ function normalizeThreadsUrl(url) {
   return `https://www.threads.net/@${username}/post/${postId}`;
 }
 
+function normalizeTikTokUrl(url) {
+  const match = url.pathname.match(/^\/@([^/]+)\/video\/(\d+)/);
+  if (!match) {
+    throw new SocialEmbedError(400, "Enter a TikTok video URL.");
+  }
+
+  const [, username, videoId] = match;
+  return `https://www.tiktok.com/@${username}/video/${videoId}`;
+}
+
 function normalizeCanonicalUrl(url) {
   const network = detectNetwork(url);
 
@@ -348,6 +404,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeFacebookUrl(url), network };
     case "threads":
       return { canonicalUrl: normalizeThreadsUrl(url), network };
+    case "tiktok":
+      return { canonicalUrl: normalizeTikTokUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -499,6 +557,21 @@ async function fetchThreadsEmbed(canonicalUrl, options = {}) {
   };
 }
 
+async function fetchTikTokOEmbed(canonicalUrl, options = {}) {
+  const endpoint = new URL("https://www.tiktok.com/oembed");
+  endpoint.searchParams.set("url", canonicalUrl);
+
+  const payload = await fetchJson(endpoint, {
+    signal: options.signal
+  });
+  return {
+    canonicalUrl,
+    html: payload.html,
+    network: "tiktok",
+    text: combineText(payload.title, extractSocialTextFromHtml(payload.html))
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -525,6 +598,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchFacebookEmbed(canonicalUrl, options.env, options);
     case "threads":
       return fetchThreadsEmbed(canonicalUrl, options);
+    case "tiktok":
+      return fetchTikTokOEmbed(canonicalUrl, options);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
