@@ -1,2 +1,5 @@
 data/source/
+dist/
+dist-tools/
+node_modules/
 .DS_Store

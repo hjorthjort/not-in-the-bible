@@ -4,10 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:data": "node scripts/build-bible-data.mjs",
-    "build": "npm run build:data && node scripts/build-static.mjs",
-    "start": "python3 -m http.server 4173",
-    "dev": "python3 -m http.server 4173",
-    "check": "node --check app.js"
+    "build:app": "tsc -p tsconfig.app.json",
+    "build:scripts": "tsc -p tsconfig.tools.json",
+    "build:data": "npm run build:scripts && node dist-tools/build-bible-data.js",
+    "build": "npm run build:app && npm run build:data && node dist-tools/build-static.js",
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
+    "check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.tools.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
   }
 }

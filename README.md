@@ -4,7 +4,7 @@ Static site for checking whether words in a public tweet appear in different Bib
 
 ## Stack
 
-- Plain HTML, CSS, and browser-side JavaScript
+- Plain HTML and CSS, with TypeScript compiled to browser-side JavaScript
 - Local Bible indexes generated from public-domain sources
 - No X API keys
 
@@ -19,6 +19,7 @@ Static site for checking whether words in a public tweet appear in different Bib
 1. Build the local Bible indexes and static fallback file:
 
    ```bash
+   npm install
    npm run build
    ```
 
@@ -29,6 +30,8 @@ Static site for checking whether words in a public tweet appear in different Bib
    ```
 
 3. Open `http://localhost:4173`.
+
+The local server intentionally serves the custom `404.html` for unknown paths so hard-refreshing deep links like `/:username/status/:statusId` works during development too.
 
 ## Bible Source
 
