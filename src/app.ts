@@ -366,13 +366,17 @@ function hideTooltip(): void {
 }
 
 function renderHome(): void {
+  const supportedNetworks = Object.values(SOCIAL_NETWORK_LABELS)
+    .map((label) => `<li>${escapeHtml(label)}</li>`)
+    .join("");
+
   app.innerHTML = `
     <section class="panel">
       <h1>Paste a post URL</h1>
-      <p>
-        Public post links from supported networks are embedded and checked against the selected local Bible index.
-      </p>
-      <p class="muted">Legacy X status paths still work and redirect into the new post view.</p>
+      <p>Drop in a post and we&apos;ll see how much of it is in the Bible.</p>
+      <ul class="supported-networks" aria-label="Supported social networks">
+        ${supportedNetworks}
+      </ul>
     </section>
   `;
 }
