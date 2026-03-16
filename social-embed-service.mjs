@@ -167,17 +167,20 @@ function extractSocialTextFromHtml(html) {
 }
 
 function extractMetaContent(html, key) {
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [
-    new RegExp(`<meta[^>]+property=(["'])${escapedKey}\\1[^>]+content=(["'])([\\s\\S]*?)\\2`, "i"),
-    new RegExp(`<meta[^>]+content=(["'])([\\s\\S]*?)\\1[^>]+property=(["'])${escapedKey}\\3`, "i"),
-    new RegExp(`<meta[^>]+name=(["'])${escapedKey}\\1[^>]+content=(["'])([\\s\\S]*?)\\2`, "i"),
-    new RegExp(`<meta[^>]+content=(["'])([\\s\\S]*?)\\1[^>]+name=(["'])${escapedKey}\\3`, "i")
-  ];
+  const headMatch = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i);
+  const searchableHtml = headMatch?.[1] ?? html.slice(0, 200000);
+  const metaTags = searchableHtml.match(/<meta\b[^>]*>/gi) ?? [];
+  const normalizedKey = key.toLowerCase();
 
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    const rawValue = match?.[3] ?? match?.[2] ?? "";
+  for (const tag of metaTags) {
+    const property = tag.match(/\bproperty=(["'])(.*?)\1/i)?.[2]?.toLowerCase() ?? "";
+    const name = tag.match(/\bname=(["'])(.*?)\1/i)?.[2]?.toLowerCase() ?? "";
+
+    if (property !== normalizedKey && name !== normalizedKey) {
+      continue;
+    }
+
+    const rawValue = tag.match(/\bcontent=(["'])([\s\S]*?)\1/i)?.[2] ?? "";
     const decoded = compactWhitespace(decodeHtmlEntities(rawValue));
     if (decoded) {
       return decoded;
@@ -222,11 +225,30 @@ function pickBestMetaText(network, html) {
       continue;
     }
 
+    if (network === "instagram" && /^create an account or log in to instagram/i.test(normalized)) {
+      continue;
+    }
+
     if (network === "facebook" && /^facebook$/i.test(normalized)) {
       continue;
     }
 
-    if (network === "threads" && /^join threads to share ideas/i.test(normalized)) {
+    if (network === "facebook" && /^log (?:in|into) facebook/i.test(normalized)) {
+      continue;
+    }
+
+    if (
+      network === "facebook" &&
+      /(isn['’]t available|not available|nicht mehr verf[üu]gbar|privatsph[aä]re|removed)/i.test(normalized)
+    ) {
+      continue;
+    }
+
+    if (network === "tiktok" && /^please wait/i.test(normalized)) {
+      continue;
+    }
+
+    if (network === "tiktok" && /^tiktok\b/i.test(normalized) && normalized.length < 40) {
       continue;
     }
 
@@ -287,6 +309,67 @@ function extractInstagramContextText(html) {
   }
 }
 
+function extractQuotedMetaText(value) {
+  const colonMatch = value.match(/:\s*["“]([\s\S]+?)["”](?:\s*\.)?$/);
+  if (colonMatch?.[1]) {
+    return compactWhitespace(colonMatch[1]);
+  }
+
+  const quotedMatch = value.match(/["“]([\s\S]+?)["”](?:\s*\.)?$/);
+  return compactWhitespace(quotedMatch?.[1] ?? "");
+}
+
+function extractSocialMetaText(network, html) {
+  const candidates = [
+    extractQuotedMetaText(extractMetaContent(html, "og:title")),
+    extractQuotedMetaText(extractMetaContent(html, "og:description")),
+    extractQuotedMetaText(extractMetaContent(html, "description")),
+    pickBestMetaText(network, html)
+  ].filter(Boolean);
+
+  return compactWhitespace(candidates[0] ?? "");
+}
+
+function getInstagramCommentReference(url) {
+  const pathMatch = url.pathname.match(/^\/(?:p|reel|reels)\/[^/]+\/c\/([^/]+)\/?$/);
+  const pathCommentId = pathMatch?.[1]?.trim() ?? "";
+  const commentId = url.searchParams.get("comment_id")?.trim() ?? "";
+  const replyCommentId = url.searchParams.get("reply_comment_id")?.trim() ?? "";
+
+  if (!pathCommentId && !commentId && !replyCommentId) {
+    return null;
+  }
+
+  return {
+    commentId: pathCommentId || commentId || null,
+    replyCommentId: replyCommentId || null
+  };
+}
+
+function getFacebookCommentReference(url) {
+  const commentId = url.searchParams.get("comment_id")?.trim() ?? "";
+  const replyCommentId = url.searchParams.get("reply_comment_id")?.trim() ?? "";
+
+  if (!commentId && !replyCommentId) {
+    return null;
+  }
+
+  return {
+    commentId: commentId || null,
+    replyCommentId: replyCommentId || null
+  };
+}
+
+function buildInstagramMediaUrl(url) {
+  return `https://www.instagram.com${url.pathname.replace(/\/+$/, "")}/`;
+}
+
+function buildInstagramPublicOEmbedUrl(targetUrl) {
+  const endpoint = new URL("https://www.instagram.com/api/v1/oembed/");
+  endpoint.searchParams.set("url", targetUrl);
+  return endpoint;
+}
+
 function buildIframeHtml(src, title, height = 760) {
   return `<iframe src="${escapeAttribute(src)}" title="${escapeAttribute(title)}" width="100%" height="${height}" style="border:0;display:block;margin:0 auto;max-width:600px;width:100%;" loading="lazy" referrerpolicy="origin-when-cross-origin" allowfullscreen></iframe>`;
 }
@@ -296,6 +379,20 @@ function buildMetaGraphOEmbedUrl(pathname, canonicalUrl, accessToken) {
   endpoint.searchParams.set("url", canonicalUrl);
   endpoint.searchParams.set("access_token", accessToken);
   return endpoint;
+}
+
+function getTikTokCommentReference(url) {
+  const commentId = url.searchParams.get("comment_id")?.trim() ?? "";
+  const replyCommentId = url.searchParams.get("reply_comment_id")?.trim() ?? "";
+
+  if (!commentId && !replyCommentId) {
+    return null;
+  }
+
+  return {
+    commentId: commentId || null,
+    replyCommentId: replyCommentId || null
+  };
 }
 
 function detectNetwork(url) {
@@ -315,10 +412,6 @@ function detectNetwork(url) {
 
   if (host === "facebook.com") {
     return "facebook";
-  }
-
-  if (host === "threads.net" || host === "threads.com") {
-    return "threads";
   }
 
   if (host === "tiktok.com") {
@@ -357,18 +450,30 @@ function normalizeBlueskyUrl(url) {
 }
 
 function normalizeInstagramUrl(url) {
-  const match = url.pathname.match(/^\/(p|reel|reels)\/([^/]+)/);
+  const match = url.pathname.match(/^\/(p|reel|reels)\/([^/]+)(?:\/c\/([^/]+))?/);
   if (!match) {
     throw new SocialEmbedError(400, "Enter an Instagram post or reel URL.");
   }
 
-  const [, kind, shortcode] = match;
-  return `https://www.instagram.com/${kind}/${shortcode}/`;
+  const [, kind, shortcode, pathCommentId] = match;
+  const canonical = new URL(`https://www.instagram.com/${kind}/${shortcode}/`);
+  const commentId = pathCommentId?.trim() || url.searchParams.get("comment_id")?.trim();
+  const replyCommentId = url.searchParams.get("reply_comment_id")?.trim();
+
+  if (commentId) {
+    canonical.searchParams.set("comment_id", commentId);
+  }
+
+  if (replyCommentId) {
+    canonical.searchParams.set("reply_comment_id", replyCommentId);
+  }
+
+  return canonical.toString();
 }
 
 function normalizeFacebookUrl(url) {
   const normalized = new URL(`https://www.facebook.com${url.pathname}`);
-  const searchKeys = ["id", "story_fbid", "fbid", "v"];
+  const searchKeys = ["id", "story_fbid", "fbid", "v", "comment_id", "reply_comment_id"];
 
   for (const key of searchKeys) {
     const value = url.searchParams.get(key);
@@ -380,16 +485,6 @@ function normalizeFacebookUrl(url) {
   return normalized.toString();
 }
 
-function normalizeThreadsUrl(url) {
-  const match = url.pathname.match(/^\/@([^/]+)\/post\/([^/]+)/);
-  if (!match) {
-    throw new SocialEmbedError(400, "Enter a Threads post URL.");
-  }
-
-  const [, username, postId] = match;
-  return `https://www.threads.net/@${username}/post/${postId}`;
-}
-
 function normalizeTikTokUrl(url) {
   const match = url.pathname.match(/^\/@([^/]+)\/video\/(\d+)/);
   if (!match) {
@@ -397,7 +492,19 @@ function normalizeTikTokUrl(url) {
   }
 
   const [, username, videoId] = match;
-  return `https://www.tiktok.com/@${username}/video/${videoId}`;
+  const canonical = new URL(`https://www.tiktok.com/@${username}/video/${videoId}`);
+  const commentId = url.searchParams.get("comment_id")?.trim();
+  const replyCommentId = url.searchParams.get("reply_comment_id")?.trim();
+
+  if (commentId) {
+    canonical.searchParams.set("comment_id", commentId);
+  }
+
+  if (replyCommentId) {
+    canonical.searchParams.set("reply_comment_id", replyCommentId);
+  }
+
+  return canonical.toString();
 }
 
 function extractYouTubeVideoId(url) {
@@ -424,13 +531,26 @@ function extractYouTubeVideoId(url) {
   return null;
 }
 
+function getYouTubeCommentId(url) {
+  const commentId = url.searchParams.get("lc")?.trim();
+  return commentId || null;
+}
+
 function normalizeYouTubeUrl(url) {
   const videoId = extractYouTubeVideoId(url);
   if (!videoId) {
     throw new SocialEmbedError(400, "Enter a YouTube video URL.");
   }
 
-  return `https://www.youtube.com/watch?v=${videoId}`;
+  const canonical = new URL("https://www.youtube.com/watch");
+  canonical.searchParams.set("v", videoId);
+
+  const commentId = getYouTubeCommentId(url);
+  if (commentId) {
+    canonical.searchParams.set("lc", commentId);
+  }
+
+  return canonical.toString();
 }
 
 function normalizeRedditUrl(url) {
@@ -440,6 +560,37 @@ function normalizeRedditUrl(url) {
   }
 
   return `https://www.reddit.com${path}/`;
+}
+
+function getRedditCommentId(url) {
+  const segments = url.pathname.split("/").filter(Boolean);
+  const commentsIndex = segments.indexOf("comments");
+  if (commentsIndex === -1) {
+    return null;
+  }
+
+  const commentId = segments[commentsIndex + 3];
+  return commentId ? commentId.trim() : null;
+}
+
+function findRedditComment(children, commentId) {
+  for (const child of children ?? []) {
+    if (child?.kind !== "t1") {
+      continue;
+    }
+
+    const data = child.data;
+    if (data?.id === commentId || data?.name === `t1_${commentId}`) {
+      return data;
+    }
+
+    const nested = findRedditComment(data?.replies?.data?.children, commentId);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
 }
 
 function normalizeCanonicalUrl(url) {
@@ -454,8 +605,6 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeInstagramUrl(url), network };
     case "facebook":
       return { canonicalUrl: normalizeFacebookUrl(url), network };
-    case "threads":
-      return { canonicalUrl: normalizeThreadsUrl(url), network };
     case "tiktok":
       return { canonicalUrl: normalizeTikTokUrl(url), network };
     case "youtube":
@@ -502,32 +651,56 @@ async function fetchBlueskyOEmbed(canonicalUrl, options = {}) {
 
 async function fetchInstagramEmbed(canonicalUrl, env, options = {}) {
   const accessToken = getMetaToken(env);
-  let html = buildIframeHtml(`${canonicalUrl.replace(/\/$/, "")}/embed/captioned/`, "Instagram post");
+  const canonical = new URL(canonicalUrl);
+  const mediaUrl = buildInstagramMediaUrl(canonical);
+  const commentReference = getInstagramCommentReference(canonical);
+  let html = buildIframeHtml(`${mediaUrl.replace(/\/$/, "")}/embed/captioned/`, "Instagram post");
   let text = "";
 
-  if (accessToken) {
+  try {
+    const publicOEmbedUrl = buildInstagramPublicOEmbedUrl(commentReference ? canonicalUrl : mediaUrl);
+    const payload = await fetchJson(publicOEmbedUrl, {
+      signal: options.signal
+    });
+    html = payload.html ?? html;
+    text = compactWhitespace(payload.title ?? "");
+  } catch {
+    text = "";
+  }
+
+  if (accessToken && (!html || !text || !commentReference)) {
     try {
       const payload = await fetchJson(
-        buildMetaGraphOEmbedUrl("instagram_oembed", canonicalUrl, accessToken),
+        buildMetaGraphOEmbedUrl("instagram_oembed", mediaUrl, accessToken),
         {
           signal: options.signal
         }
       );
       html = payload.html ?? html;
-      text = payload.title ?? "";
+      if (!text || !commentReference) {
+        text = compactWhitespace(payload.title ?? text);
+      }
     } catch {
-      text = "";
+      text = text || "";
     }
   }
 
   try {
-    const embedHtml = await fetchText(`${canonicalUrl.replace(/\/$/, "")}/embed/captioned/`, {
+    if (commentReference) {
+      const commentHtml = await fetchText(canonicalUrl, {
+        signal: options.signal
+      });
+      text = extractSocialMetaText("instagram", commentHtml) || text;
+    }
+  } catch {
+    text = text || "";
+  }
+
+  try {
+    const embedHtml = await fetchText(`${mediaUrl.replace(/\/$/, "")}/embed/captioned/`, {
       signal: options.signal
     });
-    text =
-      text ||
-      extractInstagramContextText(embedHtml) ||
-      pickBestMetaText("instagram", embedHtml);
+    text = text || extractInstagramContextText(embedHtml) || extractSocialMetaText("instagram", embedHtml);
   } catch {
     text = text || "";
   }
@@ -547,6 +720,7 @@ function looksLikeFacebookVideoUrl(canonicalUrl) {
 
 async function fetchFacebookEmbed(canonicalUrl, env, options = {}) {
   const accessToken = getMetaToken(env);
+  const commentReference = getFacebookCommentReference(new URL(canonicalUrl));
   const isVideo = looksLikeFacebookVideoUrl(canonicalUrl);
   const pluginUrl = new URL(
     `https://www.facebook.com/plugins/${isVideo ? "video.php" : "post.php"}`
@@ -576,6 +750,17 @@ async function fetchFacebookEmbed(canonicalUrl, env, options = {}) {
   }
 
   try {
+    if (commentReference) {
+      const commentHtml = await fetchText(canonicalUrl, {
+        signal: options.signal
+      });
+      text = extractSocialMetaText("facebook", commentHtml) || text;
+    }
+  } catch {
+    text = text || "";
+  }
+
+  try {
     const pluginHtml = await fetchText(pluginUrl.toString(), {
       signal: options.signal
     });
@@ -592,27 +777,6 @@ async function fetchFacebookEmbed(canonicalUrl, env, options = {}) {
   };
 }
 
-async function fetchThreadsEmbed(canonicalUrl, options = {}) {
-  const embedUrl = `${canonicalUrl.replace(/\/$/, "")}/embed`;
-  let text = "";
-
-  try {
-    const embedHtml = await fetchText(embedUrl, {
-      signal: options.signal
-    });
-    text = pickBestMetaText("threads", embedHtml);
-  } catch {
-    text = "";
-  }
-
-  return {
-    canonicalUrl,
-    html: buildIframeHtml(embedUrl, "Threads post", 760),
-    network: "threads",
-    text
-  };
-}
-
 async function fetchTikTokOEmbed(canonicalUrl, options = {}) {
   const endpoint = new URL("https://www.tiktok.com/oembed");
   endpoint.searchParams.set("url", canonicalUrl);
@@ -620,11 +784,25 @@ async function fetchTikTokOEmbed(canonicalUrl, options = {}) {
   const payload = await fetchJson(endpoint, {
     signal: options.signal
   });
+  const commentReference = getTikTokCommentReference(new URL(canonicalUrl));
+  let text = combineText(payload.title, extractSocialTextFromHtml(payload.html));
+
+  try {
+    if (commentReference) {
+      const pageHtml = await fetchText(canonicalUrl, {
+        signal: options.signal
+      });
+      text = extractSocialMetaText("tiktok", pageHtml) || text;
+    }
+  } catch {
+    text = text || combineText(payload.title, extractSocialTextFromHtml(payload.html));
+  }
+
   return {
     canonicalUrl,
     html: payload.html,
     network: "tiktok",
-    text: combineText(payload.title, extractSocialTextFromHtml(payload.html))
+    text
   };
 }
 
@@ -636,12 +814,28 @@ async function fetchYouTubeEmbed(canonicalUrl, options = {}) {
   const payload = await fetchJson(endpoint, {
     signal: options.signal
   });
+  const url = new URL(canonicalUrl);
+  let text = compactWhitespace(payload.title ?? "");
+
+  if (getYouTubeCommentId(url)) {
+    try {
+      const pageHtml = await fetchText(canonicalUrl, {
+        signal: options.signal
+      });
+      text =
+        compactWhitespace(extractMetaContent(pageHtml, "og:description")) ||
+        compactWhitespace(extractMetaContent(pageHtml, "description")) ||
+        text;
+    } catch {
+      text = text || compactWhitespace(payload.title ?? "");
+    }
+  }
 
   return {
     canonicalUrl,
     html: payload.html,
     network: "youtube",
-    text: compactWhitespace(payload.title ?? "")
+    text
   };
 }
 
@@ -657,6 +851,7 @@ async function fetchRedditEmbed(canonicalUrl, options = {}) {
   const payload = await fetchJson(endpoint, {
     signal: options.signal
   });
+  const commentId = getRedditCommentId(new URL(canonicalUrl));
 
   let text = payload.title ?? "";
 
@@ -668,7 +863,12 @@ async function fetchRedditEmbed(canonicalUrl, options = {}) {
       signal: options.signal
     });
     const post = listing?.[0]?.data?.children?.[0]?.data;
-    text = combineText(post?.title ?? payload.title ?? "", post?.selftext ?? "");
+    if (commentId) {
+      const comment = findRedditComment(listing?.[1]?.data?.children, commentId);
+      text = compactWhitespace(comment?.body ?? "") || (payload.title ?? "");
+    } else {
+      text = combineText(post?.title ?? payload.title ?? "", post?.selftext ?? "");
+    }
   } catch {
     text = payload.title ?? "";
   }
@@ -705,8 +905,6 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchInstagramEmbed(canonicalUrl, options.env, options);
     case "facebook":
       return fetchFacebookEmbed(canonicalUrl, options.env, options);
-    case "threads":
-      return fetchThreadsEmbed(canonicalUrl, options);
     case "tiktok":
       return fetchTikTokOEmbed(canonicalUrl, options);
     case "youtube":

@@ -3,7 +3,6 @@ export type SocialNetworkId =
   | "instagram"
   | "bluesky"
   | "facebook"
-  | "threads"
   | "tiktok"
   | "youtube"
   | "reddit";
@@ -13,7 +12,6 @@ export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   instagram: "Instagram",
   bluesky: "Bluesky",
   facebook: "Facebook",
-  threads: "Threads",
   tiktok: "TikTok",
   youtube: "YouTube",
   reddit: "Reddit"
@@ -42,10 +40,6 @@ export function getSocialNetworkFromUrl(value: string): SocialNetworkId | null {
 
     if (host === "facebook.com") {
       return "facebook";
-    }
-
-    if (host === "threads.net" || host === "threads.com") {
-      return "threads";
     }
 
     if (host === "tiktok.com") {
