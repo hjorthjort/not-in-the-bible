@@ -1,0 +1,13 @@
+{
+  "name": "words-in-the-bible",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:data": "node scripts/build-bible-data.mjs",
+    "build": "npm run build:data && node scripts/build-static.mjs",
+    "start": "python3 -m http.server 4173",
+    "dev": "python3 -m http.server 4173",
+    "check": "node --check app.js"
+  }
+}
