@@ -421,9 +421,6 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
 
     app.innerHTML = `
       <section class="panel">
-        <div id="tweet-embed" class="tweet-embed">${tweet.html}</div>
-      </section>
-      <section class="panel">
         <div class="stats">
           <span>${escapeHtml(bibleData.source.shortName)}</span>
           <span>${inBibleCount} words in the Bible</span>
@@ -434,6 +431,9 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
             ? `<p class="tweet-text" id="tweet-text"></p>`
             : `<p class="muted">The embed loaded, but the tweet text could not be extracted from the oEmbed HTML.</p>`
         }
+      </section>
+      <section class="panel">
+        <div id="tweet-embed" class="tweet-embed">${tweet.html}</div>
       </section>
     `;
 
