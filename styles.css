@@ -88,6 +88,10 @@ code {
   gap: 12px;
 }
 
+.select-wrap {
+  min-width: 0;
+}
+
 .tweet-form input,
 .tweet-form select,
 .tweet-form button {
@@ -104,14 +108,24 @@ code {
 
 .tweet-form select {
   background: rgba(255, 252, 246, 0.85);
-  min-width: 220px;
+  width: calc(var(--source-select-chars, 8) * 1ch + 4rem);
+  min-width: 0;
   cursor: pointer;
+  text-align: center;
 }
 
 .tweet-form button {
   background: var(--ink);
   color: white;
   cursor: pointer;
+}
+
+.source-selected {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  min-height: 1.35em;
 }
 
 .app-shell {

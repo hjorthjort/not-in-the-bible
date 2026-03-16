@@ -1,18 +1,16 @@
 export {};
 
-import {
-  extractTweetTextFromHtml,
-  normalizeWord,
-  TOKEN_PATTERN
-} from "./lib/tweet-analysis.js";
+import { buildAnalyzedText, resolveWordMatch } from "./lib/word-match.js";
+import { extractTweetTextFromHtml } from "./lib/tweet-analysis.js";
 
 const appElement = document.querySelector<HTMLElement>("#app");
 const formElement = document.querySelector<HTMLFormElement>("#tweet-form");
 const inputElement = document.querySelector<HTMLInputElement>("#tweet-url");
 const tooltipElement = document.querySelector<HTMLElement>("#tooltip");
 const sourceSelectElement = document.querySelector<HTMLSelectElement>("#bible-source");
+const sourceNameElement = document.querySelector<HTMLElement>("#bible-source-name");
 
-if (!appElement || !formElement || !inputElement || !tooltipElement || !sourceSelectElement) {
+if (!appElement || !formElement || !inputElement || !tooltipElement || !sourceSelectElement || !sourceNameElement) {
   throw new Error("Missing required app elements.");
 }
 
@@ -21,9 +19,13 @@ const form = formElement;
 const input = inputElement;
 const tooltip = tooltipElement;
 const sourceSelect = sourceSelectElement;
+const sourceName = sourceNameElement;
 
 const DEFAULT_SOURCE_ID = "kjv";
 const REDIRECT_PARAM = "__redirect";
+const DEFAULT_APP_CONFIG: AppConfig = {
+  enableWordNormalization: true
+};
 
 type Verse = {
   id: number;
@@ -70,19 +72,6 @@ type VersePayload = {
   verseById?: Map<number, Verse>;
 };
 
-type TextPart =
-  | { type: "text"; value: string }
-  | {
-      type: "word";
-      rawWord: string;
-      normalized: string;
-      matchedWord: string | null;
-      matchedWords: string[];
-      matchType: "exact" | "normalized" | "missing";
-      matchLabel: string | null;
-      inBible: boolean;
-      verseIds: number[];
-    };
 type Route =
   | { type: "home"; sourceId: string }
   | { type: "tweet"; username: string; statusId: string; canonicalUrl: string; sourceId: string }
@@ -94,8 +83,13 @@ type TweetEmbed = {
   text: string;
 };
 
+type AppConfig = {
+  enableWordNormalization: boolean;
+};
+
 declare global {
   interface Window {
+    __APP_CONFIG__?: Partial<AppConfig>;
     twttr?: {
       widgets?: {
         load: (element?: Element | null) => void;
@@ -124,167 +118,28 @@ const escapeHtml = (value: string): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+function loadAppConfig(): AppConfig {
+  const runtimeConfig = window.__APP_CONFIG__;
+
+  return {
+    enableWordNormalization:
+      typeof runtimeConfig?.enableWordNormalization === "boolean"
+        ? runtimeConfig.enableWordNormalization
+        : DEFAULT_APP_CONFIG.enableWordNormalization
+  };
+}
+
+const appConfig = loadAppConfig();
+const wordMatchOptions = {
+  enableNormalization: appConfig.enableWordNormalization
+};
+
 function resolveSourceId(catalog: SourceCatalog, requestedSourceId: string | null | undefined): string {
   if (requestedSourceId && catalog.sources.some((source) => source.id === requestedSourceId)) {
     return requestedSourceId;
   }
 
   return catalog.defaultSourceId;
-}
-
-const IRREGULAR_NORMALIZATIONS: Record<string, string[]> = {
-  childrens: ["children"]
-};
-
-const CONTRACTION_EXPANSIONS: Record<string, string[]> = {
-  dont: ["do", "not"],
-  doesnt: ["does", "not"],
-  didnt: ["did", "not"],
-  cant: ["can", "not"],
-  couldnt: ["could", "not"],
-  wont: ["will", "not"],
-  wouldnt: ["would", "not"],
-  shouldnt: ["should", "not"],
-  isnt: ["is", "not"],
-  arent: ["are", "not"],
-  wasnt: ["was", "not"],
-  werent: ["were", "not"],
-  havent: ["have", "not"],
-  hasnt: ["has", "not"],
-  hadnt: ["had", "not"],
-  im: ["i", "am"],
-  ive: ["i", "have"],
-  ill: ["i", "will"],
-  id: ["i", "would"],
-  youre: ["you", "are"],
-  youve: ["you", "have"],
-  youll: ["you", "will"],
-  hes: ["he", "is"],
-  hed: ["he", "would"],
-  hell: ["he", "will"],
-  shes: ["she", "is"],
-  shed: ["she", "would"],
-  shell: ["she", "will"],
-  its: ["it", "is"],
-  itd: ["it", "would"],
-  itll: ["it", "will"],
-  were: ["we", "are"],
-  weve: ["we", "have"],
-  well: ["we", "will"],
-  theyre: ["they", "are"],
-  theyve: ["they", "have"],
-  theyll: ["they", "will"],
-  thats: ["that", "is"],
-  theres: ["there", "is"],
-  whats: ["what", "is"]
-};
-
-function getWordCandidates(word: string): string[] {
-  const candidates = new Set<string>();
-  const normalized = normalizeWord(word);
-  if (!normalized) {
-    return [];
-  }
-
-  candidates.add(normalized);
-
-  for (const irregular of IRREGULAR_NORMALIZATIONS[normalized] ?? []) {
-    candidates.add(irregular);
-  }
-
-  if (normalized.endsWith("ies") && normalized.length > 3) {
-    candidates.add(`${normalized.slice(0, -3)}y`);
-  }
-
-  if (normalized.endsWith("es") && normalized.length > 3) {
-    candidates.add(normalized.slice(0, -2));
-  }
-
-  if (normalized.endsWith("s") && normalized.length > 2) {
-    candidates.add(normalized.slice(0, -1));
-  }
-
-  if (normalized.endsWith("ing") && normalized.length > 5) {
-    const stem = normalized.slice(0, -3);
-    candidates.add(stem);
-    candidates.add(`${stem}e`);
-    if (stem.length > 1 && stem.at(-1) === stem.at(-2)) {
-      candidates.add(stem.slice(0, -1));
-    }
-  }
-
-  if (normalized.endsWith("ied") && normalized.length > 4) {
-    candidates.add(`${normalized.slice(0, -3)}y`);
-  }
-
-  if (normalized.endsWith("ed") && normalized.length > 4) {
-    const stem = normalized.slice(0, -2);
-    candidates.add(stem);
-    candidates.add(`${stem}e`);
-    if (stem.length > 1 && stem.at(-1) === stem.at(-2)) {
-      candidates.add(stem.slice(0, -1));
-    }
-  }
-
-  return [...candidates];
-}
-
-function resolveWordMatch(
-  rawWord: string,
-  wordData: WordIndexPayload
-): {
-  normalized: string;
-  matchedWord: string | null;
-  matchedWords: string[];
-  matchType: "exact" | "normalized" | "missing";
-  matchLabel: string | null;
-  verseIds: number[];
-} {
-  const candidates = getWordCandidates(rawWord);
-  const normalized = candidates[0] ?? normalizeWord(rawWord);
-  const contractionExpansion = CONTRACTION_EXPANSIONS[normalized];
-
-  if (contractionExpansion?.length) {
-    const expandedVerseIds = contractionExpansion
-      .map((candidate) => wordData.words[candidate] ?? [])
-      .flat();
-
-    if (expandedVerseIds.length) {
-      return {
-        normalized,
-        matchedWord: contractionExpansion.join(" "),
-        matchedWords: contractionExpansion,
-        matchType: "normalized",
-        matchLabel: `Inexact match: expanded to "${contractionExpansion.join(" ")}"`,
-        verseIds: [...new Set(expandedVerseIds)]
-      };
-    }
-  }
-
-  for (const [index, candidate] of candidates.entries()) {
-    const verseIds = wordData.words[candidate];
-    if (!verseIds?.length) {
-      continue;
-    }
-
-    return {
-      normalized,
-      matchedWord: candidate,
-      matchedWords: [candidate],
-      matchType: index === 0 ? "exact" : "normalized",
-      matchLabel: index === 0 ? null : `Inexact match: matched as "${candidate}"`,
-      verseIds
-    };
-  }
-
-  return {
-    normalized,
-    matchedWord: null,
-    matchedWords: [],
-    matchType: "missing",
-    matchLabel: null,
-    verseIds: []
-  };
 }
 
 function parseTweetUrl(value: string): { username: string; statusId: string; canonicalUrl: string } | null {
@@ -372,47 +227,6 @@ async function loadVerses(sourceId: string): Promise<VersePayload> {
   return promise;
 }
 
-function buildAnalyzedText(text: string, wordData: WordIndexPayload): TextPart[] {
-  const parts: TextPart[] = [];
-  let lastIndex = 0;
-
-  for (const match of text.matchAll(TOKEN_PATTERN)) {
-    const [rawWord] = match;
-    const start = match.index ?? 0;
-    const end = start + rawWord.length;
-    const resolved = resolveWordMatch(rawWord, wordData);
-    const inBible = resolved.verseIds.length > 0;
-
-    if (start > lastIndex) {
-      parts.push({
-        type: "text",
-        value: text.slice(lastIndex, start)
-      });
-    }
-
-    parts.push({
-      type: "word",
-      rawWord,
-      normalized: resolved.normalized,
-      matchedWord: resolved.matchedWord,
-      matchedWords: resolved.matchedWords,
-      matchType: resolved.matchType,
-      matchLabel: resolved.matchLabel,
-      inBible,
-      verseIds: resolved.verseIds
-    });
-    lastIndex = end;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push({
-      type: "text",
-      value: text.slice(lastIndex)
-    });
-  }
-
-  return parts;
-}
 function sampleVerses(verseIds: number[], verseData: VersePayload, count = 5): Verse[] {
   const shuffled = [...verseIds];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
@@ -512,14 +326,28 @@ function renderHome(): void {
 
 async function syncSourceSelect(selectedSourceId: string): Promise<void> {
   const catalog = await loadSourceCatalog();
-  sourceSelect.innerHTML = catalog.sources
-    .map(
-      (source) => `
-        <option value="${source.id}">${escapeHtml(source.shortName)}: ${escapeHtml(source.name)}</option>
-      `
-    )
-    .join("");
-  sourceSelect.value = resolveSourceId(catalog, selectedSourceId);
+  const resolvedSourceId = resolveSourceId(catalog, selectedSourceId);
+  const options = document.createDocumentFragment();
+  let longestShortName = 0;
+
+  for (const source of catalog.sources) {
+    const option = document.createElement("option");
+    option.value = source.id;
+    option.textContent = source.shortName;
+    option.dataset.fullName = source.name;
+    option.selected = source.id === resolvedSourceId;
+    options.append(option);
+    longestShortName = Math.max(longestShortName, source.shortName.length);
+  }
+
+  sourceSelect.replaceChildren(options);
+  sourceSelect.value = resolvedSourceId;
+  sourceSelect.style.setProperty("--source-select-chars", String(Math.max(longestShortName, 4)));
+
+  const selectedOption = sourceSelect.selectedOptions.item(0);
+  const selectedSourceName = selectedOption?.dataset.fullName ?? "";
+  sourceName.textContent = selectedSourceName;
+  sourceSelect.title = selectedSourceName;
 }
 
 async function fetchTweetEmbed(tweetUrl: string): Promise<TweetEmbed> {
@@ -561,7 +389,7 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
     ]);
 
     const text = tweet.text;
-    const analyzed = buildAnalyzedText(text, bibleData);
+    const analyzed = buildAnalyzedText(text, bibleData.words, wordMatchOptions);
     const inBibleCount = analyzed.filter((part) => part.type === "word" && part.inBible).length;
     const missingCount = analyzed.filter((part) => part.type === "word" && !part.inBible).length;
 
@@ -649,7 +477,7 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
       loadWordIndex(sourceId),
       loadVerses(sourceId)
     ]);
-    const resolved = resolveWordMatch(route.word, wordData);
+    const resolved = resolveWordMatch(route.word, wordData.words, wordMatchOptions);
     const displayWord = resolved.matchedWord ?? resolved.normalized;
     const verseIds = resolved.verseIds;
     const normalizationNote =
@@ -818,6 +646,10 @@ document.addEventListener("click", (event) => {
 });
 
 sourceSelect.addEventListener("change", () => {
+  const selectedOption = sourceSelect.selectedOptions.item(0);
+  const selectedSourceName = selectedOption?.dataset.fullName ?? "";
+  sourceName.textContent = selectedSourceName;
+  sourceSelect.title = selectedSourceName;
   const route = parsePath(window.location.pathname, window.location.search);
   navigate(window.location.pathname, sourceSelect.value || route.sourceId || DEFAULT_SOURCE_ID);
 });

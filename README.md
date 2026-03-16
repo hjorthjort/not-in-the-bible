@@ -33,6 +33,13 @@ Static site for checking whether words in a public tweet appear in different Bib
 
 The local server intentionally serves the custom `404.html` for unknown paths so hard-refreshing deep links like `/:username/status/:statusId` works during development too, and the static fallback redirects those requests back into the app shell.
 
+## Deployment Config
+
+Runtime feature flags live in `app-config.js`.
+
+- Set `enableWordNormalization` to `false` to disable inexact fallback matching quickly.
+- Exact lookup still uses the base lowercase/apostrophe/diacritic folding needed to hit the local word index.
+
 ## Bible Source
 
 Enabled sources are downloaded from eBible.org during `npm run build` and indexed into per-translation datasets.
