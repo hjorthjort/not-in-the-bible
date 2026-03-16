@@ -2,13 +2,15 @@ const app = document.querySelector("#app");
 const form = document.querySelector("#tweet-form");
 const input = document.querySelector("#tweet-url");
 const tooltip = document.querySelector("#tooltip");
+const sourceSelect = document.querySelector("#bible-source");
 
 const TOKEN_PATTERN = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
+const DEFAULT_SOURCE_ID = "kjv";
 const dataState = {
-  wordsPromise: null,
-  wordsPayload: null,
-  versesPromise: null,
-  versesPayload: null
+  catalogPromise: null,
+  catalogPayload: null,
+  wordsBySource: new Map(),
+  versesBySource: new Map()
 };
 
 const escapeHtml = (value) =>
@@ -51,45 +53,63 @@ function parseTweetUrl(value) {
   }
 }
 
-async function loadWordIndex() {
-  if (dataState.wordsPayload) {
-    return dataState.wordsPayload;
+async function loadSourceCatalog() {
+  if (dataState.catalogPayload) {
+    return dataState.catalogPayload;
   }
 
-  if (!dataState.wordsPromise) {
-    dataState.wordsPromise = fetch("/data/bible-words.json").then(async (response) => {
+  if (!dataState.catalogPromise) {
+    dataState.catalogPromise = fetch("/data/sources.json").then(async (response) => {
       if (!response.ok) {
-        throw new Error("Failed to load Bible index.");
+        throw new Error("Failed to load Bible source catalog.");
       }
 
       const payload = await response.json();
-      dataState.wordsPayload = payload;
+      dataState.catalogPayload = payload;
       return payload;
     });
   }
 
-  return dataState.wordsPromise;
+  return dataState.catalogPromise;
 }
 
-async function loadVerses() {
-  if (dataState.versesPayload) {
-    return dataState.versesPayload;
+async function loadWordIndex(sourceId) {
+  if (dataState.wordsBySource.has(sourceId)) {
+    return dataState.wordsBySource.get(sourceId);
   }
 
-  if (!dataState.versesPromise) {
-    dataState.versesPromise = fetch("/data/bible-verses.json").then(async (response) => {
+  const promise = fetch(`/data/${sourceId}/words.json`).then(async (response) => {
+    if (!response.ok) {
+      throw new Error("Failed to load Bible index.");
+    }
+
+    const payload = await response.json();
+    dataState.wordsBySource.set(sourceId, payload);
+    return payload;
+  });
+
+  dataState.wordsBySource.set(sourceId, promise);
+  return promise;
+}
+
+async function loadVerses(sourceId) {
+  if (dataState.versesBySource.has(sourceId)) {
+    return dataState.versesBySource.get(sourceId);
+  }
+
+  const promise = fetch(`/data/${sourceId}/verses.json`).then(async (response) => {
       if (!response.ok) {
         throw new Error("Failed to load verse data.");
       }
 
       const payload = await response.json();
       payload.verseById = new Map(payload.verses.map((verse) => [verse.id, verse]));
-      dataState.versesPayload = payload;
+      dataState.versesBySource.set(sourceId, payload);
       return payload;
     });
-  }
 
-  return dataState.versesPromise;
+  dataState.versesBySource.set(sourceId, promise);
+  return promise;
 }
 
 function buildAnalyzedText(text, wordData) {
@@ -174,13 +194,27 @@ function renderHome() {
       <h1>Paste a tweet URL</h1>
       <p>
         Public tweet links from <code>x.com</code> or <code>twitter.com</code> are supported.
-        The app embeds the tweet, extracts the visible tweet text, and checks each word against a local World English Bible index.
+        The app embeds the tweet, extracts the visible tweet text, and checks each word against the selected local Bible index.
       </p>
       <p class="muted">
         If X refuses to return embed data for a tweet, this static version cannot recover it server-side.
       </p>
     </section>
   `;
+}
+
+async function syncSourceSelect(selectedSourceId) {
+  const catalog = await loadSourceCatalog();
+  sourceSelect.innerHTML = catalog.sources
+    .map(
+      (source) => `
+        <option value="${source.id}">${escapeHtml(source.shortName)}: ${escapeHtml(source.name)}</option>
+      `
+    )
+    .join("");
+  sourceSelect.value = catalog.sources.some((source) => source.id === selectedSourceId)
+    ? selectedSourceId
+    : catalog.defaultSourceId;
 }
 
 async function fetchTweetEmbed(tweetUrl) {
@@ -207,6 +241,7 @@ async function fetchTweetEmbed(tweetUrl) {
 }
 
 async function renderTweetRoute(route) {
+  await syncSourceSelect(route.sourceId);
   input.value = route.canonicalUrl;
   app.innerHTML = `
     <section class="panel loading">
@@ -217,7 +252,7 @@ async function renderTweetRoute(route) {
   try {
     const [tweet, bibleData] = await Promise.all([
       fetchTweetEmbed(route.canonicalUrl),
-      loadWordIndex()
+      loadWordIndex(route.sourceId)
     ]);
 
     const text = tweet.text;
@@ -231,6 +266,7 @@ async function renderTweetRoute(route) {
       </section>
       <section class="panel">
         <div class="stats">
+          <span>${escapeHtml(bibleData.source.shortName)}</span>
           <span>${inBibleCount} words in the Bible</span>
           <span>${missingCount} words not in the Bible</span>
         </div>
@@ -257,15 +293,15 @@ async function renderTweetRoute(route) {
         element.textContent = part.rawWord;
 
         if (part.inBible) {
-          element.href = `/word/${encodeURIComponent(part.normalized)}`;
+          element.href = `/word/${encodeURIComponent(part.normalized)}?source=${encodeURIComponent(route.sourceId)}`;
           element.dataset.word = part.normalized;
           element.addEventListener("mouseenter", async () => {
-            const data = await loadVerses();
+            const data = await loadVerses(route.sourceId);
             showTooltip(element, sampleVerses(part.verseIds, data));
           });
           element.addEventListener("mouseleave", hideTooltip);
           element.addEventListener("focus", async () => {
-            const data = await loadVerses();
+            const data = await loadVerses(route.sourceId);
             showTooltip(element, sampleVerses(part.verseIds, data));
           });
           element.addEventListener("blur", hideTooltip);
@@ -294,6 +330,8 @@ async function renderTweetRoute(route) {
 }
 
 async function renderWordRoute(word) {
+  const route = parsePath(window.location.pathname, window.location.search);
+  await syncSourceSelect(route.sourceId);
   app.innerHTML = `
     <section class="panel loading">
       <p>Loading verses…</p>
@@ -301,14 +339,17 @@ async function renderWordRoute(word) {
   `;
 
   try {
-    const [wordData, verseData] = await Promise.all([loadWordIndex(), loadVerses()]);
+    const [wordData, verseData] = await Promise.all([
+      loadWordIndex(route.sourceId),
+      loadVerses(route.sourceId)
+    ]);
     const normalized = normalizeWord(word);
     const verseIds = wordData.words[normalized] ?? [];
 
     if (!verseIds.length) {
       app.innerHTML = `
         <section class="panel">
-          <h1>${escapeHtml(normalized)}</h1>
+          <h1>${escapeHtml(normalized)} <span class="source-tag">${escapeHtml(wordData.source.shortName)}</span></h1>
           <p>This word does not appear in the indexed Bible text.</p>
         </section>
       `;
@@ -318,8 +359,8 @@ async function renderWordRoute(word) {
     const verses = verseIds.map((id) => verseData.verseById.get(id));
     app.innerHTML = `
       <section class="panel">
-        <h1>${escapeHtml(normalized)}</h1>
-        <p>${verses.length} verse references found in the World English Bible.</p>
+        <h1>${escapeHtml(normalized)} <span class="source-tag">${escapeHtml(wordData.source.shortName)}</span></h1>
+        <p>${verses.length} verse references found in ${escapeHtml(wordData.source.name)}.</p>
         <div class="verse-list">
           ${verses
             .map(
@@ -344,7 +385,9 @@ async function renderWordRoute(word) {
   }
 }
 
-function parsePath(pathname) {
+function parsePath(pathname, search = window.location.search) {
+  const params = new URLSearchParams(search);
+  const requestedSourceId = params.get("source") || localStorage.getItem("preferredBibleSource") || DEFAULT_SOURCE_ID;
   const tweetMatch = pathname.match(/^\/([^/]+)\/status\/(\d+)\/?$/);
   if (tweetMatch) {
     const [, username, statusId] = tweetMatch;
@@ -352,7 +395,8 @@ function parsePath(pathname) {
       type: "tweet",
       username,
       statusId,
-      canonicalUrl: `https://x.com/${username}/status/${statusId}`
+      canonicalUrl: `https://x.com/${username}/status/${statusId}`,
+      sourceId: requestedSourceId
     };
   }
 
@@ -360,16 +404,18 @@ function parsePath(pathname) {
   if (wordMatch) {
     return {
       type: "word",
-      word: decodeURIComponent(wordMatch[1])
+      word: decodeURIComponent(wordMatch[1]),
+      sourceId: requestedSourceId
     };
   }
 
-  return { type: "home" };
+  return { type: "home", sourceId: requestedSourceId };
 }
 
 async function renderRoute() {
   hideTooltip();
-  const route = parsePath(window.location.pathname);
+  const route = parsePath(window.location.pathname, window.location.search);
+  await syncSourceSelect(route.sourceId);
 
   if (route.type === "tweet") {
     await renderTweetRoute(route);
@@ -384,8 +430,10 @@ async function renderRoute() {
   renderHome();
 }
 
-function navigate(pathname) {
-  window.history.pushState({}, "", pathname);
+function navigate(pathname, sourceId = sourceSelect.value || DEFAULT_SOURCE_ID) {
+  const search = sourceId && sourceId !== DEFAULT_SOURCE_ID ? `?source=${encodeURIComponent(sourceId)}` : "";
+  localStorage.setItem("preferredBibleSource", sourceId);
+  window.history.pushState({}, "", `${pathname}${search}`);
   renderRoute();
 }
 
@@ -399,7 +447,7 @@ form.addEventListener("submit", (event) => {
   }
 
   input.setCustomValidity("");
-  navigate(`/${parsed.username}/status/${parsed.statusId}`);
+  navigate(`/${parsed.username}/status/${parsed.statusId}`, sourceSelect.value || DEFAULT_SOURCE_ID);
 });
 
 document.addEventListener("click", (event) => {
@@ -410,7 +458,13 @@ document.addEventListener("click", (event) => {
 
   const url = new URL(link.href);
   event.preventDefault();
-  navigate(url.pathname);
+  const nextSourceId = url.searchParams.get("source") || sourceSelect.value || DEFAULT_SOURCE_ID;
+  navigate(url.pathname, nextSourceId);
+});
+
+sourceSelect.addEventListener("change", () => {
+  const route = parsePath(window.location.pathname, window.location.search);
+  navigate(window.location.pathname, sourceSelect.value || route.sourceId || DEFAULT_SOURCE_ID);
 });
 
 window.addEventListener("popstate", () => {

@@ -1,0 +1,38 @@
+export const DEFAULT_SOURCE_ID = "kjv";
+
+export const BIBLE_SOURCES = [
+  {
+    id: "kjv",
+    name: "King James Version",
+    shortName: "KJV",
+    description: "1769 standardized text, archaic English",
+    archiveUrl: "https://ebible.org/eng-kjv2006/eng-kjv2006_html.zip",
+    sourceUrl: "https://ebible.org/eng-kjv2006/",
+    license: "Public Domain outside the UK",
+    licenseUrl: "https://ebible.org/eng-kjv2006/copyright.htm"
+  },
+  {
+    id: "web",
+    name: "World English Bible",
+    shortName: "WEB",
+    description: "modern English, ecumenical book set",
+    archiveUrl: "https://ebible.org/eng-web/eng-web_html.zip",
+    sourceUrl: "https://ebible.org/eng-web/",
+    license: "Public Domain",
+    licenseUrl: "https://ebible.org/eng-web/copyright.htm"
+  },
+  {
+    id: "bbe",
+    name: "Bible in Basic English",
+    shortName: "BBE",
+    description: "simplified English",
+    archiveUrl: "https://ebible.org/engBBE/engBBE_html.zip",
+    sourceUrl: "https://ebible.org/engBBE/",
+    license: "Public Domain in the United States per eBible's notice",
+    licenseUrl: "https://ebible.org/engBBE/copyright.htm"
+  }
+];
+
+export function getBibleSourceById(id) {
+  return BIBLE_SOURCES.find((source) => source.id === id) ?? BIBLE_SOURCES[0];
+}
