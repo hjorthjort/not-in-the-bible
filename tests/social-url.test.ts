@@ -6,6 +6,7 @@ import { getSocialNetworkFromUrl, isSupportedSocialUrl } from "../src/lib/social
 test("supported networks are detected from canonical URLs", () => {
   assert.equal(getSocialNetworkFromUrl("https://x.com/jack/status/20"), "x");
   assert.equal(getSocialNetworkFromUrl("https://bsky.app/profile/bsky.app/post/3kq7ezofqak2f"), "bluesky");
+  assert.equal(getSocialNetworkFromUrl("https://www.instagram.com/p/ABC123/"), "instagram");
 });
 
 test("unsupported URLs are rejected", () => {

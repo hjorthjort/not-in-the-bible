@@ -1,7 +1,8 @@
-export type SocialNetworkId = "x" | "bluesky";
+export type SocialNetworkId = "x" | "instagram" | "bluesky";
 
 export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   x: "X",
+  instagram: "Instagram",
   bluesky: "Bluesky"
 };
 
@@ -20,6 +21,10 @@ export function getSocialNetworkFromUrl(value: string): SocialNetworkId | null {
 
     if (host === "bsky.app") {
       return "bluesky";
+    }
+
+    if (host === "instagram.com") {
+      return "instagram";
     }
 
     return null;

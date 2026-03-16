@@ -1,4 +1,5 @@
 const DEFAULT_TIMEOUT_MS = 15000;
+const META_EMBED_API_VERSION = "v25.0";
 
 export class SocialEmbedError extends Error {
   constructor(status, message) {
@@ -68,6 +69,36 @@ async function fetchJson(url, options = {}) {
   }
 }
 
+async function fetchText(url, options = {}) {
+  const { cleanup, signal } = withTimeout(options.signal, options.timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      headers: options.headers,
+      redirect: options.redirect ?? "follow",
+      signal
+    });
+
+    if (!response.ok) {
+      throw new SocialEmbedError(response.status, `Upstream request failed for ${url}.`);
+    }
+
+    return await response.text();
+  } catch (error) {
+    if (error instanceof SocialEmbedError) {
+      throw error;
+    }
+
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new SocialEmbedError(504, `Timed out while fetching ${url}.`);
+    }
+
+    throw new SocialEmbedError(502, `Could not fetch ${url}.`);
+  } finally {
+    cleanup();
+  }
+}
+
 function decodeHtmlEntities(value) {
   return value
     .replace(/&nbsp;/gi, " ")
@@ -109,6 +140,112 @@ function extractSocialTextFromHtml(html) {
   return compactWhitespace(decodeHtmlEntities(stripHtml(normalizedHtml)));
 }
 
+function extractMetaContent(html, key) {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`<meta[^>]+property=(["'])${escapedKey}\\1[^>]+content=(["'])([\\s\\S]*?)\\2`, "i"),
+    new RegExp(`<meta[^>]+content=(["'])([\\s\\S]*?)\\1[^>]+property=(["'])${escapedKey}\\3`, "i"),
+    new RegExp(`<meta[^>]+name=(["'])${escapedKey}\\1[^>]+content=(["'])([\\s\\S]*?)\\2`, "i"),
+    new RegExp(`<meta[^>]+content=(["'])([\\s\\S]*?)\\1[^>]+name=(["'])${escapedKey}\\3`, "i")
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    const rawValue = match?.[3] ?? match?.[2] ?? "";
+    const decoded = compactWhitespace(decodeHtmlEntities(rawValue));
+    if (decoded) {
+      return decoded;
+    }
+  }
+
+  return "";
+}
+
+function extractLongestParagraphText(html) {
+  const paragraphs = [...html.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((match) =>
+      compactWhitespace(
+        decodeHtmlEntities(
+          stripHtml(match[1].replace(/<br\s*\/?>/gi, "\n").replace(/<img\b[^>]*>/gi, " "))
+        )
+      )
+    )
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+
+  return paragraphs[0] ?? "";
+}
+
+function pickBestMetaText(network, html) {
+  const metaCandidates = [
+    extractMetaContent(html, "og:description"),
+    extractMetaContent(html, "description"),
+    extractMetaContent(html, "twitter:description"),
+    extractMetaContent(html, "og:title"),
+    extractMetaContent(html, "twitter:title"),
+    extractLongestParagraphText(html)
+  ].filter(Boolean);
+
+  for (const candidate of metaCandidates) {
+    const normalized = compactWhitespace(candidate);
+    if (!normalized) {
+      continue;
+    }
+
+    if (network === "instagram" && /^instagram$/i.test(normalized)) {
+      continue;
+    }
+
+    return normalized;
+  }
+
+  return "";
+}
+
+function escapeAttribute(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function getMetaToken(env = {}) {
+  return env.META_EMBED_ACCESS_TOKEN || env.META_APP_ACCESS_TOKEN || null;
+}
+
+function extractInstagramContextText(html) {
+  const contextMatch = html.match(/contextJSON":"((?:\\.|[^"])*)"/);
+  if (!contextMatch?.[1]) {
+    return "";
+  }
+
+  try {
+    const decodedJson = JSON.parse(`"${contextMatch[1]}"`);
+    const context = JSON.parse(decodedJson);
+    const candidates = [
+      context?.context?.media?.caption,
+      context?.gql_data?.shortcode_media?.edge_media_to_caption?.edges?.[0]?.node?.text,
+      context?.gql_data?.xdt_shortcode_media?.edge_media_to_caption?.edges?.[0]?.node?.text
+    ];
+
+    return compactWhitespace(candidates.find((value) => typeof value === "string") ?? "");
+  } catch {
+    return "";
+  }
+}
+
+function buildIframeHtml(src, title, height = 760) {
+  return `<iframe src="${escapeAttribute(src)}" title="${escapeAttribute(title)}" width="100%" height="${height}" style="border:0;display:block;margin:0 auto;max-width:600px;width:100%;" loading="lazy" referrerpolicy="origin-when-cross-origin" allowfullscreen></iframe>`;
+}
+
+function buildMetaGraphOEmbedUrl(pathname, canonicalUrl, accessToken) {
+  const endpoint = new URL(`https://graph.facebook.com/${META_EMBED_API_VERSION}/${pathname}`);
+  endpoint.searchParams.set("url", canonicalUrl);
+  endpoint.searchParams.set("access_token", accessToken);
+  return endpoint;
+}
+
 function detectNetwork(url) {
   const host = normalizeHost(url.hostname);
 
@@ -118,6 +255,10 @@ function detectNetwork(url) {
 
   if (host === "bsky.app") {
     return "bluesky";
+  }
+
+  if (host === "instagram.com") {
+    return "instagram";
   }
 
   throw new SocialEmbedError(400, "Unsupported post URL.");
@@ -143,6 +284,16 @@ function normalizeBlueskyUrl(url) {
   return `https://bsky.app/profile/${actor}/post/${postId}`;
 }
 
+function normalizeInstagramUrl(url) {
+  const match = url.pathname.match(/^\/(p|reel|reels)\/([^/]+)/);
+  if (!match) {
+    throw new SocialEmbedError(400, "Enter an Instagram post or reel URL.");
+  }
+
+  const [, kind, shortcode] = match;
+  return `https://www.instagram.com/${kind}/${shortcode}/`;
+}
+
 function normalizeCanonicalUrl(url) {
   const network = detectNetwork(url);
 
@@ -151,6 +302,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeXPath(url), network };
     case "bluesky":
       return { canonicalUrl: normalizeBlueskyUrl(url), network };
+    case "instagram":
+      return { canonicalUrl: normalizeInstagramUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -189,6 +342,46 @@ async function fetchBlueskyOEmbed(canonicalUrl, options = {}) {
   };
 }
 
+async function fetchInstagramEmbed(canonicalUrl, env, options = {}) {
+  const accessToken = getMetaToken(env);
+  let html = buildIframeHtml(`${canonicalUrl.replace(/\/$/, "")}/embed/captioned/`, "Instagram post");
+  let text = "";
+
+  if (accessToken) {
+    try {
+      const payload = await fetchJson(
+        buildMetaGraphOEmbedUrl("instagram_oembed", canonicalUrl, accessToken),
+        {
+          signal: options.signal
+        }
+      );
+      html = payload.html ?? html;
+      text = payload.title ?? "";
+    } catch {
+      text = "";
+    }
+  }
+
+  try {
+    const embedHtml = await fetchText(`${canonicalUrl.replace(/\/$/, "")}/embed/captioned/`, {
+      signal: options.signal
+    });
+    text =
+      text ||
+      extractInstagramContextText(embedHtml) ||
+      pickBestMetaText("instagram", embedHtml);
+  } catch {
+    text = text || "";
+  }
+
+  return {
+    canonicalUrl,
+    html,
+    network: "instagram",
+    text
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -209,6 +402,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchXOEmbed(canonicalUrl, options);
     case "bluesky":
       return fetchBlueskyOEmbed(canonicalUrl, options);
+    case "instagram":
+      return fetchInstagramEmbed(canonicalUrl, options.env, options);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
