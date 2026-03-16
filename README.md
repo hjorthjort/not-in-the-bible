@@ -55,11 +55,11 @@ Runtime feature flags live in `app-config.js`.
 
 Enabled sources are downloaded from eBible.org during `npm run build` and indexed into per-translation datasets.
 
-- Default: King James Version + Apocrypha
-  Source: `https://ebible.org/eng-kjv/`
-  Archive: `https://ebible.org/eng-kjv/eng-kjv_html.zip`
-  License: Public Domain
-  License page: `https://ebible.org/eng-kjv/copyright.htm`
+- Default: King James Version
+  Source: `https://ebible.org/eng-kjv2006/`
+  Archive: `https://ebible.org/eng-kjv2006/eng-kjv2006_html.zip`
+  License: Public Domain outside the UK
+  License page: `https://ebible.org/eng-kjv2006/copyright.htm`
 - World English Bible
   Source: `https://ebible.org/eng-web/`
   Archive: `https://ebible.org/eng-web/eng-web_html.zip`

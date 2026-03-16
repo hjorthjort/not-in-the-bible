@@ -1,4 +1,4 @@
-export const DEFAULT_SOURCE_ID = "kjv-apocrypha";
+export const DEFAULT_SOURCE_ID = "kjv";
 
 export type BibleSource = {
   id: string;
