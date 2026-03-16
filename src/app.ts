@@ -1,6 +1,7 @@
 export {};
 
 import { buildAnalyzedText, resolveWordMatch } from "./lib/word-match.js";
+import { renderHighlightedVerseText } from "./lib/verse-highlight.js";
 import { extractTweetTextFromHtml } from "./lib/tweet-analysis.js";
 
 const appElement = document.querySelector<HTMLElement>("#app");
@@ -279,7 +280,12 @@ async function renderErrorState({
   `;
 }
 
-function showTooltip(target: HTMLElement, verses: Verse[], matchLabel?: string | null): void {
+function showTooltip(
+  target: HTMLElement,
+  verses: Verse[],
+  matchedWords: string[],
+  matchLabel?: string | null
+): void {
   if (!verses.length) {
     tooltip.hidden = true;
     return;
@@ -293,7 +299,7 @@ function showTooltip(target: HTMLElement, verses: Verse[], matchLabel?: string |
         (verse) => `
           <a class="tooltip__verse" href="${verse.url}" target="_blank" rel="noreferrer">
             <strong>${escapeHtml(verse.reference)}</strong>
-            <span>${escapeHtml(verse.text)}</span>
+            <span>${renderHighlightedVerseText(verse.text, matchedWords)}</span>
           </a>
         `
       )
@@ -438,12 +444,12 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
           element.dataset.word = linkedWord;
           element.addEventListener("mouseenter", async () => {
             const data = await loadVerses(sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data), part.matchLabel);
+            showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
           });
           element.addEventListener("mouseleave", hideTooltip);
           element.addEventListener("focus", async () => {
             const data = await loadVerses(sourceId);
-            showTooltip(element, sampleVerses(part.verseIds, data), part.matchLabel);
+            showTooltip(element, sampleVerses(part.verseIds, data), part.matchedWords, part.matchLabel);
           });
           element.addEventListener("blur", hideTooltip);
         }
@@ -516,7 +522,7 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
               (verse) => `
                 <article class="verse-card">
                   <a href="${verse.url}" target="_blank" rel="noreferrer">${escapeHtml(verse.reference)}</a>
-                  <p>${escapeHtml(verse.text)}</p>
+                  <p>${renderHighlightedVerseText(verse.text, resolved.matchedWords)}</p>
                 </article>
               `
             )
