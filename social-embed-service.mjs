@@ -196,6 +196,10 @@ function pickBestMetaText(network, html) {
       continue;
     }
 
+    if (network === "facebook" && /^facebook$/i.test(normalized)) {
+      continue;
+    }
+
     return normalized;
   }
 
@@ -261,6 +265,10 @@ function detectNetwork(url) {
     return "instagram";
   }
 
+  if (host === "facebook.com") {
+    return "facebook";
+  }
+
   throw new SocialEmbedError(400, "Unsupported post URL.");
 }
 
@@ -294,6 +302,20 @@ function normalizeInstagramUrl(url) {
   return `https://www.instagram.com/${kind}/${shortcode}/`;
 }
 
+function normalizeFacebookUrl(url) {
+  const normalized = new URL(`https://www.facebook.com${url.pathname}`);
+  const searchKeys = ["id", "story_fbid", "fbid", "v"];
+
+  for (const key of searchKeys) {
+    const value = url.searchParams.get(key);
+    if (value) {
+      normalized.searchParams.set(key, value);
+    }
+  }
+
+  return normalized.toString();
+}
+
 function normalizeCanonicalUrl(url) {
   const network = detectNetwork(url);
 
@@ -304,6 +326,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeBlueskyUrl(url), network };
     case "instagram":
       return { canonicalUrl: normalizeInstagramUrl(url), network };
+    case "facebook":
+      return { canonicalUrl: normalizeFacebookUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -382,6 +406,58 @@ async function fetchInstagramEmbed(canonicalUrl, env, options = {}) {
   };
 }
 
+function looksLikeFacebookVideoUrl(canonicalUrl) {
+  const url = new URL(canonicalUrl);
+  return /\/videos\//.test(url.pathname) || url.pathname === "/watch" || url.searchParams.has("v");
+}
+
+async function fetchFacebookEmbed(canonicalUrl, env, options = {}) {
+  const accessToken = getMetaToken(env);
+  const isVideo = looksLikeFacebookVideoUrl(canonicalUrl);
+  const pluginUrl = new URL(
+    `https://www.facebook.com/plugins/${isVideo ? "video.php" : "post.php"}`
+  );
+  pluginUrl.searchParams.set("href", canonicalUrl);
+  if (!isVideo) {
+    pluginUrl.searchParams.set("show_text", "true");
+  }
+  pluginUrl.searchParams.set("width", "500");
+
+  let html = buildIframeHtml(pluginUrl.toString(), "Facebook post", isVideo ? 420 : 760);
+  let text = "";
+
+  if (accessToken) {
+    try {
+      const payload = await fetchJson(
+        buildMetaGraphOEmbedUrl(isVideo ? "oembed_video" : "oembed_post", canonicalUrl, accessToken),
+        {
+          signal: options.signal
+        }
+      );
+      html = payload.html ?? html;
+      text = payload.title ?? "";
+    } catch {
+      text = "";
+    }
+  }
+
+  try {
+    const pluginHtml = await fetchText(pluginUrl.toString(), {
+      signal: options.signal
+    });
+    text = text || pickBestMetaText("facebook", pluginHtml);
+  } catch {
+    text = text || "";
+  }
+
+  return {
+    canonicalUrl,
+    html,
+    network: "facebook",
+    text
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -404,6 +480,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchBlueskyOEmbed(canonicalUrl, options);
     case "instagram":
       return fetchInstagramEmbed(canonicalUrl, options.env, options);
+    case "facebook":
+      return fetchFacebookEmbed(canonicalUrl, options.env, options);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }

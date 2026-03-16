@@ -1,9 +1,10 @@
-export type SocialNetworkId = "x" | "instagram" | "bluesky";
+export type SocialNetworkId = "x" | "instagram" | "bluesky" | "facebook";
 
 export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   x: "X",
   instagram: "Instagram",
-  bluesky: "Bluesky"
+  bluesky: "Bluesky",
+  facebook: "Facebook"
 };
 
 function normalizeHost(hostname: string): string {
@@ -25,6 +26,10 @@ export function getSocialNetworkFromUrl(value: string): SocialNetworkId | null {
 
     if (host === "instagram.com") {
       return "instagram";
+    }
+
+    if (host === "facebook.com") {
+      return "facebook";
     }
 
     return null;

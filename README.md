@@ -92,4 +92,5 @@ This software is licensed under the MIT License. See [LICENSE](LICENSE).
 
 - Public oEmbed is used for X and Bluesky.
 - Instagram uses the public embed page plus best-effort text extraction. Set `META_EMBED_ACCESS_TOKEN` to enable Meta's official oEmbed path.
+- Facebook uses the public plugin embed plus best-effort text extraction. Set `META_EMBED_ACCESS_TOKEN` to enable Meta's official oEmbed path.
 - Build output writes `data/sources.json` plus per-source `words.json`, `verses.json`, and `meta.json` files under `data/<source-id>/`, then assembles the deployable site in `out/`.

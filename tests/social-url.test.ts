@@ -7,6 +7,7 @@ test("supported networks are detected from canonical URLs", () => {
   assert.equal(getSocialNetworkFromUrl("https://x.com/jack/status/20"), "x");
   assert.equal(getSocialNetworkFromUrl("https://bsky.app/profile/bsky.app/post/3kq7ezofqak2f"), "bluesky");
   assert.equal(getSocialNetworkFromUrl("https://www.instagram.com/p/ABC123/"), "instagram");
+  assert.equal(getSocialNetworkFromUrl("https://www.facebook.com/20531316728/posts/10154009990506729/"), "facebook");
 });
 
 test("unsupported URLs are rejected", () => {
