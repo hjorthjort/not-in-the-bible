@@ -11,6 +11,7 @@ test("supported networks are detected from canonical URLs", () => {
   assert.equal(getSocialNetworkFromUrl("https://www.threads.net/@threads/post/CuP9t8nL74j"), "threads");
   assert.equal(getSocialNetworkFromUrl("https://www.tiktok.com/@scout2015/video/6718335390845095173"), "tiktok");
   assert.equal(getSocialNetworkFromUrl("https://youtu.be/dQw4w9WgXcQ"), "youtube");
+  assert.equal(getSocialNetworkFromUrl("https://www.reddit.com/r/funny/comments/3g1jfi/buttons/"), "reddit");
 });
 
 test("unsupported URLs are rejected", () => {

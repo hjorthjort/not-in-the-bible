@@ -1,5 +1,7 @@
 const DEFAULT_TIMEOUT_MS = 15000;
 const META_EMBED_API_VERSION = "v25.0";
+const REDDIT_JSON_USER_AGENT =
+  "words-in-the-bible/0.1 (+https://github.com/hjort/wods-in-the-bible)";
 
 export class SocialEmbedError extends Error {
   constructor(status, message) {
@@ -327,6 +329,10 @@ function detectNetwork(url) {
     return "youtube";
   }
 
+  if (host === "reddit.com" || host === "old.reddit.com") {
+    return "reddit";
+  }
+
   throw new SocialEmbedError(400, "Unsupported post URL.");
 }
 
@@ -427,6 +433,15 @@ function normalizeYouTubeUrl(url) {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
+function normalizeRedditUrl(url) {
+  const path = url.pathname.replace(/\/+$/, "");
+  if (!/\/comments\//.test(path)) {
+    throw new SocialEmbedError(400, "Enter a Reddit post URL.");
+  }
+
+  return `https://www.reddit.com${path}/`;
+}
+
 function normalizeCanonicalUrl(url) {
   const network = detectNetwork(url);
 
@@ -445,6 +460,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeTikTokUrl(url), network };
     case "youtube":
       return { canonicalUrl: normalizeYouTubeUrl(url), network };
+    case "reddit":
+      return { canonicalUrl: normalizeRedditUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -628,6 +645,42 @@ async function fetchYouTubeEmbed(canonicalUrl, options = {}) {
   };
 }
 
+function buildRedditJsonUrl(canonicalUrl) {
+  const url = new URL(canonicalUrl);
+  const normalizedPath = url.pathname.replace(/\/+$/, "");
+  return `https://old.reddit.com${normalizedPath}.json?raw_json=1`;
+}
+
+async function fetchRedditEmbed(canonicalUrl, options = {}) {
+  const endpoint = new URL("https://www.reddit.com/oembed");
+  endpoint.searchParams.set("url", canonicalUrl);
+  const payload = await fetchJson(endpoint, {
+    signal: options.signal
+  });
+
+  let text = payload.title ?? "";
+
+  try {
+    const listing = await fetchJson(buildRedditJsonUrl(canonicalUrl), {
+      headers: {
+        "User-Agent": REDDIT_JSON_USER_AGENT
+      },
+      signal: options.signal
+    });
+    const post = listing?.[0]?.data?.children?.[0]?.data;
+    text = combineText(post?.title ?? payload.title ?? "", post?.selftext ?? "");
+  } catch {
+    text = payload.title ?? "";
+  }
+
+  return {
+    canonicalUrl,
+    html: payload.html,
+    network: "reddit",
+    text
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -658,6 +711,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchTikTokOEmbed(canonicalUrl, options);
     case "youtube":
       return fetchYouTubeEmbed(canonicalUrl, options);
+    case "reddit":
+      return fetchRedditEmbed(canonicalUrl, options);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
