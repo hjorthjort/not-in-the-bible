@@ -9,6 +9,8 @@
     "build:scripts": "tsc -p tsconfig.tools.json",
     "build:data": "npm run build:scripts && node dist-tools/build-bible-data.js",
     "build": "npm run build:app && npm run build:data && node dist-tools/build-static.js",
+    "test:smoke": "npm run build:scripts && node dist-tools/smoke-static.js",
+    "verify:deploy": "npm run check && npm test && npm run build && npm run test:smoke",
     "start": "node server.mjs",
     "dev": "node server.mjs",
     "check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.tools.json --noEmit && tsc -p tsconfig.test.json --noEmit",

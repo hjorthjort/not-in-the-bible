@@ -1,5 +1,8 @@
 data/source/
 dist/
 dist-tools/
+dist-tests/
 node_modules/
+out/
+site/
 .DS_Store
