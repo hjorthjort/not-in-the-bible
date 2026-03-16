@@ -62,7 +62,7 @@ async function main(): Promise<void> {
     defaultSourceId: string;
     sources: Array<{ id: string }>;
   };
-  assert.equal(sourceCatalog.defaultSourceId, "kjv");
+  assert.equal(sourceCatalog.defaultSourceId, "kjv-apocrypha");
   assert.ok(sourceCatalog.sources.length >= 1, "Expected at least one Bible source in the catalog.");
 
   const serverProcess = spawn(process.execPath, [path.join(ROOT_DIR, "server.mjs")], {
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
     const catalogResponse = await fetch(`${BASE_URL}/data/sources.json`);
     assert.equal(catalogResponse.status, 200);
     const catalogPayload = (await catalogResponse.json()) as { defaultSourceId: string };
-    assert.equal(catalogPayload.defaultSourceId, "kjv");
+    assert.equal(catalogPayload.defaultSourceId, "kjv-apocrypha");
 
     for (const pathname of ["/word/faith", "/tester/status/1234567890", "/definitely-not-a-route"]) {
       const response = await fetchText(pathname);

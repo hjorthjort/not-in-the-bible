@@ -23,7 +23,7 @@ const tooltip = tooltipElement;
 const sourceSelect = sourceSelectElement;
 const sourceName = sourceNameElement;
 
-const DEFAULT_SOURCE_ID = "kjv";
+const DEFAULT_SOURCE_ID = "kjv-apocrypha";
 const REDIRECT_PARAM = "__redirect";
 const DEFAULT_APP_CONFIG: AppConfig = {
   enableWordNormalization: true

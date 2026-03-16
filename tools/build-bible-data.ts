@@ -3,7 +3,7 @@ import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSy
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 
-import { BIBLE_SOURCES, type BibleSource } from "./bible-sources.js";
+import { BIBLE_SOURCES, DEFAULT_SOURCE_ID, type BibleSource } from "./bible-sources.js";
 
 const OUTPUT_DIR = path.resolve("data");
 const SOURCE_DIR = path.join(OUTPUT_DIR, "source");
@@ -394,7 +394,7 @@ async function main(): Promise<void> {
   writeFileSync(
     path.join(OUTPUT_DIR, "sources.json"),
     JSON.stringify({
-      defaultSourceId: BIBLE_SOURCES[0].id,
+      defaultSourceId: DEFAULT_SOURCE_ID,
       sources: catalog
     })
   );
