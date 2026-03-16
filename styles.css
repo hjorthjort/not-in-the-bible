@@ -137,6 +137,8 @@ code {
 .tweet-text {
   font-size: clamp(1.2rem, 2vw, 1.6rem);
   line-height: 1.9;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
 }
 
 .stats {
@@ -226,6 +228,62 @@ code {
 
 .muted {
   color: var(--muted);
+}
+
+.panel--error {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(255, 250, 240, 0.96), rgba(234, 217, 187, 0.82)),
+    var(--panel);
+}
+
+.panel--error::after {
+  content: "";
+  position: absolute;
+  inset: auto -60px -80px auto;
+  width: 220px;
+  height: 220px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(162, 49, 40, 0.16), transparent 68%);
+  pointer-events: none;
+}
+
+.error-code {
+  margin: 0 0 12px;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.error-verse {
+  margin-top: 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 252, 246, 0.78);
+}
+
+.error-verse__eyebrow {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.error-verse__link {
+  display: inline-block;
+  margin-bottom: 8px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.error-verse__text {
+  margin: 0;
+  color: var(--ink);
 }
 
 .sr-only {

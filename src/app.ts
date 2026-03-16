@@ -146,6 +146,26 @@ function parseTweetUrl(value: string): { username: string; statusId: string; can
   }
 }
 
+function extractTweetText(node: Node | null): string {
+  if (!node) {
+    return "";
+  }
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent ?? "";
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return "";
+  }
+
+  if (node.nodeName === "BR") {
+    return "\n";
+  }
+
+  return Array.from(node.childNodes, (childNode) => extractTweetText(childNode)).join("");
+}
+
 async function loadSourceCatalog(): Promise<SourceCatalog> {
   if (dataState.catalogPayload) {
     return dataState.catalogPayload;
@@ -259,6 +279,10 @@ function sampleVerses(verseIds: number[], verseData: VersePayload, count = 5): V
     .filter((verse): verse is Verse => Boolean(verse));
 }
 
+function getRandomVerse(verseData: VersePayload): Verse {
+  return verseData.verses[Math.floor(Math.random() * verseData.verses.length)];
+}
+
 function showTooltip(target: HTMLElement, verses: Verse[]): void {
   if (!verses.length) {
     tooltip.hidden = true;
@@ -330,7 +354,7 @@ async function fetchTweetEmbed(tweetUrl: string): Promise<TweetEmbed> {
   const payload = (await response.json()) as { html: string };
   const parser = new DOMParser();
   const documentFragment = parser.parseFromString(payload.html, "text/html");
-  const text = documentFragment.querySelector("blockquote p")?.textContent?.trim() ?? "";
+  const text = extractTweetText(documentFragment.querySelector("blockquote p")).trim();
 
   return {
     html: payload.html,
@@ -412,15 +436,19 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
     }
 
     window.twttr?.widgets?.load(document.querySelector("#tweet-embed"));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+  } catch {
+    const verseData = await loadVerses(route.sourceId);
+    const verse = getRandomVerse(verseData);
     app.innerHTML = `
-      <section class="panel">
-        <h1>Tweet lookup failed</h1>
-        <p>${escapeHtml(message)}</p>
-        <p class="muted">
-          For a purely static site, public oEmbed is the workable no-key path. If X stops returning oEmbed data, the fallback is adding a tiny serverless fetcher or manual paste mode.
-        </p>
+      <section class="panel panel--error">
+        <p class="error-code">Error</p>
+        <h1>Couldn't find tweet</h1>
+        <p>Couldn't find tweet</p>
+        <aside class="error-verse">
+          <p class="error-verse__eyebrow">Random verse from ${escapeHtml(verseData.source.shortName)}</p>
+          <a class="error-verse__link" href="${verse.url}" target="_blank" rel="noreferrer">${escapeHtml(verse.reference)}</a>
+          <p class="error-verse__text">${escapeHtml(verse.text)}</p>
+        </aside>
       </section>
     `;
   }
