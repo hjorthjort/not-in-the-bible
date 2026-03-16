@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 
@@ -7,6 +7,8 @@ import { BIBLE_SOURCES, type BibleSource } from "./bible-sources.js";
 
 const OUTPUT_DIR = path.resolve("data");
 const SOURCE_DIR = path.join(OUTPUT_DIR, "source");
+const DOWNLOAD_RETRY_COUNT = 4;
+const DOWNLOAD_RETRY_DELAY_MS = 1_000;
 const LEGACY_OUTPUT_FILES = [
   path.join(OUTPUT_DIR, "bible-index.json"),
   path.join(OUTPUT_DIR, "bible-words.json"),
@@ -184,21 +186,92 @@ function readArchiveFile(sourceZip: string, filename: string): string {
   });
 }
 
+function isValidArchive(sourceZip: string): boolean {
+  try {
+    listArchiveFiles(sourceZip);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+function wait(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+async function downloadSourceArchiveOnce(source: BibleSource, archivePath: string): Promise<void> {
+  const tempArchivePath = `${archivePath}.${process.pid}.part`;
+  rmSync(tempArchivePath, { force: true });
+
+  const response = await fetch(source.archiveUrl);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+  }
+
+  if (!response.body) {
+    throw new Error("Response body was empty.");
+  }
+
+  try {
+    await pipeline(response.body, createWriteStream(tempArchivePath));
+    renameSync(tempArchivePath, archivePath);
+
+    if (!isValidArchive(archivePath)) {
+      rmSync(archivePath, { force: true });
+      throw new Error("Downloaded archive is not a readable zip file.");
+    }
+  } catch (error) {
+    rmSync(tempArchivePath, { force: true });
+    throw error;
+  }
+}
+
 async function downloadSourceArchive(source: BibleSource): Promise<string> {
   mkdirSync(SOURCE_DIR, { recursive: true });
   const archivePath = path.join(SOURCE_DIR, `${source.id}.zip`);
 
   if (existsSync(archivePath)) {
-    return archivePath;
+    if (isValidArchive(archivePath)) {
+      return archivePath;
+    }
+
+    console.warn(`Cached archive for ${source.name} is invalid. Downloading a fresh copy.`);
+    rmSync(archivePath, { force: true });
   }
 
-  const response = await fetch(source.archiveUrl);
-  if (!response.ok || !response.body) {
-    throw new Error(`Failed to download ${source.name} from ${source.archiveUrl}.`);
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= DOWNLOAD_RETRY_COUNT; attempt += 1) {
+    try {
+      await downloadSourceArchiveOnce(source, archivePath);
+      return archivePath;
+    } catch (error) {
+      lastError = error;
+      rmSync(archivePath, { force: true });
+      rmSync(`${archivePath}.${process.pid}.part`, { force: true });
+
+      if (attempt === DOWNLOAD_RETRY_COUNT) {
+        break;
+      }
+
+      console.warn(
+        `Download failed for ${source.name} (attempt ${attempt}/${DOWNLOAD_RETRY_COUNT}): ${formatError(error)}. Retrying...`
+      );
+      await wait(DOWNLOAD_RETRY_DELAY_MS * attempt);
+    }
   }
 
-  await pipeline(response.body, createWriteStream(archivePath));
-  return archivePath;
+  throw new Error(`Failed to download ${source.name} from ${source.archiveUrl}: ${formatError(lastError)}`);
 }
 
 function buildIndexForSource(source: BibleSource, sourceZip: string): {
