@@ -11,8 +11,17 @@ const inputElement = document.querySelector<HTMLInputElement>("#tweet-url");
 const tooltipElement = document.querySelector<HTMLElement>("#tooltip");
 const sourceSelectElement = document.querySelector<HTMLSelectElement>("#bible-source");
 const sourceNameElement = document.querySelector<HTMLElement>("#bible-source-name");
+const sourceShortElement = document.querySelector<HTMLElement>("#bible-source-short");
 
-if (!appElement || !formElement || !inputElement || !tooltipElement || !sourceSelectElement || !sourceNameElement) {
+if (
+  !appElement ||
+  !formElement ||
+  !inputElement ||
+  !tooltipElement ||
+  !sourceSelectElement ||
+  !sourceNameElement ||
+  !sourceShortElement
+) {
   throw new Error("Missing required app elements.");
 }
 
@@ -22,6 +31,7 @@ const input = inputElement;
 const tooltip = tooltipElement;
 const sourceSelect = sourceSelectElement;
 const sourceName = sourceNameElement;
+const sourceShort = sourceShortElement;
 
 const DEFAULT_SOURCE_ID = "kjv-apocrypha";
 const REDIRECT_PARAM = "__redirect";
@@ -339,11 +349,12 @@ async function syncSourceSelect(selectedSourceId: string): Promise<void> {
 
   for (const source of catalog.sources) {
     const option = document.createElement("option");
-    const optionLabel = source.shortName;
+    const optionLabel = `${source.shortName}: ${source.name}`;
     option.value = source.id;
     option.label = optionLabel;
     option.textContent = optionLabel;
     option.dataset.fullName = source.name;
+    option.dataset.shortName = source.shortName;
     option.selected = source.id === resolvedSourceId;
     options.append(option);
     longestShortName = Math.max(longestShortName, source.shortName.length);
@@ -355,7 +366,9 @@ async function syncSourceSelect(selectedSourceId: string): Promise<void> {
 
   const selectedOption = sourceSelect.selectedOptions.item(0);
   const selectedSourceName = selectedOption?.dataset.fullName ?? "";
+  const selectedSourceShortName = selectedOption?.dataset.shortName ?? "";
   sourceName.textContent = selectedSourceName;
+  sourceShort.textContent = selectedSourceShortName;
   sourceSelect.title = selectedSourceName;
 }
 
@@ -659,7 +672,9 @@ document.addEventListener("click", (event) => {
 sourceSelect.addEventListener("change", () => {
   const selectedOption = sourceSelect.selectedOptions.item(0);
   const selectedSourceName = selectedOption?.dataset.fullName ?? "";
+  const selectedSourceShortName = selectedOption?.dataset.shortName ?? "";
   sourceName.textContent = selectedSourceName;
+  sourceShort.textContent = selectedSourceShortName;
   sourceSelect.title = selectedSourceName;
   const route = parsePath(window.location.pathname, window.location.search);
   navigate(window.location.pathname, sourceSelect.value || route.sourceId || DEFAULT_SOURCE_ID);

@@ -89,7 +89,21 @@ code {
 }
 
 .select-wrap {
+  position: relative;
+  display: block;
   min-width: 0;
+}
+
+.select-wrap__value {
+  position: absolute;
+  inset: 50% 3rem auto 20px;
+  transform: translateY(-50%);
+  color: var(--ink);
+  pointer-events: none;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tweet-form input,
@@ -112,6 +126,11 @@ code {
   min-width: 0;
   cursor: pointer;
   text-align: center;
+  color: transparent;
+}
+
+.tweet-form select option {
+  color: var(--ink);
 }
 
 .tweet-form button {
