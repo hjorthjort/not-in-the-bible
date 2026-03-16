@@ -479,14 +479,6 @@ function detectNetwork(url) {
     return "hackernews";
   }
 
-  if (host === "lobste.rs") {
-    return "lobsters";
-  }
-
-  if (host === "quora.com") {
-    return "quora";
-  }
-
   if (host === "github.com") {
     return "github";
   }
@@ -649,43 +641,6 @@ function normalizeHackerNewsUrl(url) {
   return buildHackerNewsItemUrl(itemId);
 }
 
-function getLobstersCommentId(url) {
-  const commentMatch = url.hash.match(/^#c_([a-z0-9]+)/i);
-  return commentMatch?.[1] ?? null;
-}
-
-function normalizeLobstersUrl(url) {
-  const match = url.pathname.match(/^\/s\/([^/]+)(?:\/([^/]+))?/);
-  if (!match) {
-    throw new SocialEmbedError(400, "Enter a Lobsters story URL.");
-  }
-
-  const [, shortId, slug] = match;
-  const canonical = new URL(`https://lobste.rs/s/${shortId}${slug ? `/${slug}` : ""}`);
-  const commentId = getLobstersCommentId(url);
-
-  if (commentId) {
-    canonical.hash = `c_${commentId}`;
-  }
-
-  return canonical.toString();
-}
-
-function humanizeSlug(value) {
-  return compactWhitespace(decodeURIComponent(value).replace(/[-_+]+/g, " "));
-}
-
-function normalizeQuoraUrl(url) {
-  const pathname = url.pathname.replace(/\/+$/, "");
-  const segments = pathname.split("/").filter(Boolean);
-
-  if (!segments.length) {
-    throw new SocialEmbedError(400, "Enter a Quora question URL.");
-  }
-
-  return `https://www.quora.com/${segments.join("/")}`;
-}
-
 function getGitHubCommentReference(url) {
   const hash = url.hash.replace(/^#/, "");
 
@@ -804,10 +759,6 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeRedditUrl(url), network };
     case "hackernews":
       return { canonicalUrl: normalizeHackerNewsUrl(url), network };
-    case "lobsters":
-      return { canonicalUrl: normalizeLobstersUrl(url), network };
-    case "quora":
-      return { canonicalUrl: normalizeQuoraUrl(url), network };
     case "github":
       return { canonicalUrl: normalizeGitHubUrl(url), network };
     default:
@@ -1176,83 +1127,6 @@ function buildHackerNewsEmbedHtml(item, canonicalUrl, bodyText, story) {
   });
 }
 
-function buildLobstersJsonUrl(canonicalUrl) {
-  const url = new URL(canonicalUrl);
-  const normalizedPath = url.pathname.replace(/\/+$/, "");
-  return `https://lobste.rs${normalizedPath}.json`;
-}
-
-function findLobstersComment(comments, shortId) {
-  for (const comment of comments ?? []) {
-    if (comment?.short_id === shortId) {
-      return comment;
-    }
-
-    const nested = findLobstersComment(comment?.comments, shortId);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return null;
-}
-
-function buildLobstersEmbedHtml(story, canonicalUrl, bodyText, comment) {
-  const isComment = Boolean(comment);
-  const title = isComment
-    ? `Comment by ${comment.commenting_user ?? "unknown"}`
-    : compactWhitespace(story.title ?? "Lobsters story");
-  const linkedUrl = story.url ?? null;
-  const linkedHost = linkedUrl ? getHostnameLabel(linkedUrl) : "";
-  const storyUrl = story.comments_url ?? canonicalUrl.split("#")[0];
-  const metaParts = [];
-  const author = isComment ? comment.commenting_user : story.submitter_user;
-  const score = isComment ? comment.score : story.score;
-  const commentCount = story.comment_count;
-
-  if (author) {
-    metaParts.push(`by ${author}`);
-  }
-
-  if (typeof score === "number") {
-    metaParts.push(`${score} points`);
-  }
-
-  if (typeof commentCount === "number") {
-    metaParts.push(`${commentCount} comments`);
-  }
-
-  return buildSocialCardHtml({
-    actions: [
-      {
-        href: canonicalUrl,
-        label: "Open on Lobsters"
-      },
-      ...(linkedUrl
-        ? [
-            {
-              href: linkedUrl,
-              label: isComment ? "Open linked story" : "Open linked page"
-            }
-          ]
-        : [])
-    ],
-    canonicalUrl,
-    context: isComment
-      ? story.title
-        ? { href: storyUrl, label: `On ${story.title}` }
-        : null
-      : linkedHost
-        ? { href: linkedUrl, label: linkedHost }
-        : null,
-    eyebrow: `Lobsters ${isComment ? "comment" : "story"}`,
-    metaParts,
-    networkClass: "lobsters",
-    previewText: bodyText,
-    title
-  });
-}
-
 async function fetchRedditEmbed(canonicalUrl, options = {}) {
   const endpoint = new URL("https://www.reddit.com/oembed");
   endpoint.searchParams.set("url", canonicalUrl);
@@ -1305,76 +1179,6 @@ async function fetchHackerNewsEmbed(canonicalUrl, options = {}) {
     html: buildHackerNewsEmbedHtml(item, canonicalUrl, bodyText, story),
     network: "hackernews",
     text
-  };
-}
-
-async function fetchLobstersEmbed(canonicalUrl, options = {}) {
-  const story = await fetchJson(buildLobstersJsonUrl(canonicalUrl), {
-    signal: options.signal
-  });
-  const commentId = getLobstersCommentId(new URL(canonicalUrl));
-  const comment = commentId ? findLobstersComment(story.comments, commentId) : null;
-
-  if (commentId && !comment) {
-    throw new SocialEmbedError(404, "This Lobsters comment could not be found.");
-  }
-
-  const bodyText = comment
-    ? extractTextFromHtmlFragment(comment.comment ?? "")
-    : compactWhitespace(story.description_plain ?? extractTextFromHtmlFragment(story.description ?? ""));
-  const text = comment ? bodyText : combineText(story.title ?? "", bodyText);
-
-  return {
-    canonicalUrl,
-    html: buildLobstersEmbedHtml(story, canonicalUrl, bodyText, comment),
-    network: "lobsters",
-    text
-  };
-}
-
-function extractQuoraContext(canonicalUrl) {
-  const url = new URL(canonicalUrl);
-  const segments = url.pathname.split("/").filter(Boolean);
-  const questionTitle = segments[0] ? humanizeSlug(segments[0]) : "";
-  const answerAuthor = segments[1] === "answer" && segments[2] ? humanizeSlug(segments[2]) : "";
-
-  return {
-    answerAuthor,
-    questionTitle
-  };
-}
-
-function buildQuoraEmbedHtml(canonicalUrl, questionTitle, answerAuthor) {
-  return buildSocialCardHtml({
-    actions: [
-      {
-        href: canonicalUrl,
-        label: "Open on Quora"
-      }
-    ],
-    canonicalUrl,
-    eyebrow: `Quora ${answerAuthor ? "answer" : "question"}`,
-    metaParts: [
-      ...(answerAuthor ? [`answer by ${answerAuthor}`] : []),
-      "question title derived from URL"
-    ],
-    networkClass: "quora",
-    previewText: "Quora blocks public server-side text extraction here, so this view uses the question title from the URL.",
-    title: questionTitle
-  });
-}
-
-async function fetchQuoraEmbed(canonicalUrl) {
-  const { answerAuthor, questionTitle } = extractQuoraContext(canonicalUrl);
-  if (!questionTitle) {
-    throw new SocialEmbedError(400, "Enter a Quora question URL.");
-  }
-
-  return {
-    canonicalUrl,
-    html: buildQuoraEmbedHtml(canonicalUrl, questionTitle, answerAuthor),
-    network: "quora",
-    text: questionTitle
   };
 }
 
@@ -1498,10 +1302,6 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchRedditEmbed(canonicalUrl, options);
     case "hackernews":
       return fetchHackerNewsEmbed(canonicalUrl, options);
-    case "lobsters":
-      return fetchLobstersEmbed(canonicalUrl, options);
-    case "quora":
-      return fetchQuoraEmbed(canonicalUrl);
     case "github":
       return fetchGitHubEmbed(canonicalUrl, options);
     default:

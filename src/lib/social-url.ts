@@ -7,8 +7,6 @@ export type SocialNetworkId =
   | "youtube"
   | "reddit"
   | "hackernews"
-  | "lobsters"
-  | "quora"
   | "github";
 
 export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
@@ -20,8 +18,6 @@ export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   youtube: "YouTube",
   reddit: "Reddit",
   hackernews: "Hacker News",
-  lobsters: "Lobsters",
-  quora: "Quora",
   github: "GitHub"
 };
 
@@ -67,14 +63,6 @@ export function getSocialNetworkFromUrl(value: string): SocialNetworkId | null {
       if (url.pathname === "/item" && /^\d+$/.test(itemId)) {
         return "hackernews";
       }
-    }
-
-    if (host === "lobste.rs" && /^\/s\/[^/]+/.test(url.pathname)) {
-      return "lobsters";
-    }
-
-    if (host === "quora.com" && url.pathname !== "/") {
-      return "quora";
     }
 
     if (host === "github.com" && /^\/[^/]+\/[^/]+\/(?:issues|pull)\/\d+/.test(url.pathname)) {
