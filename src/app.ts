@@ -71,6 +71,8 @@ type TextPart =
       type: "word";
       rawWord: string;
       normalized: string;
+      matchedWord: string | null;
+      matchType: "exact" | "normalized" | "missing";
       inBible: boolean;
       verseIds: number[];
     };
@@ -122,6 +124,94 @@ function normalizeWord(word: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[’']/g, "")
     .toLowerCase();
+}
+
+const IRREGULAR_NORMALIZATIONS: Record<string, string[]> = {
+  childrens: ["children"]
+};
+
+function getWordCandidates(word: string): string[] {
+  const candidates = new Set<string>();
+  const normalized = normalizeWord(word);
+  if (!normalized) {
+    return [];
+  }
+
+  candidates.add(normalized);
+
+  for (const irregular of IRREGULAR_NORMALIZATIONS[normalized] ?? []) {
+    candidates.add(irregular);
+  }
+
+  if (normalized.endsWith("ies") && normalized.length > 3) {
+    candidates.add(`${normalized.slice(0, -3)}y`);
+  }
+
+  if (normalized.endsWith("es") && normalized.length > 3) {
+    candidates.add(normalized.slice(0, -2));
+  }
+
+  if (normalized.endsWith("s") && normalized.length > 2) {
+    candidates.add(normalized.slice(0, -1));
+  }
+
+  if (normalized.endsWith("ing") && normalized.length > 5) {
+    const stem = normalized.slice(0, -3);
+    candidates.add(stem);
+    candidates.add(`${stem}e`);
+    if (stem.length > 1 && stem.at(-1) === stem.at(-2)) {
+      candidates.add(stem.slice(0, -1));
+    }
+  }
+
+  if (normalized.endsWith("ied") && normalized.length > 4) {
+    candidates.add(`${normalized.slice(0, -3)}y`);
+  }
+
+  if (normalized.endsWith("ed") && normalized.length > 4) {
+    const stem = normalized.slice(0, -2);
+    candidates.add(stem);
+    candidates.add(`${stem}e`);
+    if (stem.length > 1 && stem.at(-1) === stem.at(-2)) {
+      candidates.add(stem.slice(0, -1));
+    }
+  }
+
+  return [...candidates];
+}
+
+function resolveWordMatch(
+  rawWord: string,
+  wordData: WordIndexPayload
+): {
+  normalized: string;
+  matchedWord: string | null;
+  matchType: "exact" | "normalized" | "missing";
+  verseIds: number[];
+} {
+  const candidates = getWordCandidates(rawWord);
+  const normalized = candidates[0] ?? normalizeWord(rawWord);
+
+  for (const [index, candidate] of candidates.entries()) {
+    const verseIds = wordData.words[candidate];
+    if (!verseIds?.length) {
+      continue;
+    }
+
+    return {
+      normalized,
+      matchedWord: candidate,
+      matchType: index === 0 ? "exact" : "normalized",
+      verseIds
+    };
+  }
+
+  return {
+    normalized,
+    matchedWord: null,
+    matchType: "missing",
+    verseIds: []
+  };
 }
 
 function parseTweetUrl(value: string): { username: string; statusId: string; canonicalUrl: string } | null {
@@ -241,9 +331,8 @@ function buildAnalyzedText(text: string, wordData: WordIndexPayload): TextPart[]
     const [rawWord] = match;
     const start = match.index ?? 0;
     const end = start + rawWord.length;
-    const normalized = normalizeWord(rawWord);
-    const verseIds = wordData.words[normalized] ?? [];
-    const inBible = verseIds.length > 0;
+    const resolved = resolveWordMatch(rawWord, wordData);
+    const inBible = resolved.verseIds.length > 0;
 
     if (start > lastIndex) {
       parts.push({
@@ -255,9 +344,11 @@ function buildAnalyzedText(text: string, wordData: WordIndexPayload): TextPart[]
     parts.push({
       type: "word",
       rawWord,
-      normalized,
+      normalized: resolved.normalized,
+      matchedWord: resolved.matchedWord,
+      matchType: resolved.matchType,
       inBible,
-      verseIds
+      verseIds: resolved.verseIds
     });
     lastIndex = end;
   }
@@ -430,6 +521,7 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
           <span>${inBibleCount} words in the Bible</span>
           <span>${missingCount} words not in the Bible</span>
         </div>
+        <p class="match-legend muted">Gray highlight = matched after light normalization.</p>
         ${
           text
             ? `<p class="tweet-text" id="tweet-text"></p>`
@@ -453,11 +545,16 @@ async function renderTweetRoute(route: Extract<Route, { type: "tweet" }>): Promi
 
         const element = document.createElement(part.inBible ? "a" : "span");
         element.className = part.inBible ? "word word--present" : "word word--missing";
+        if (part.matchType === "normalized") {
+          element.classList.add("word--normalized");
+          element.title = part.matchedWord ? `Matched as ${part.matchedWord}` : "Matched after normalization";
+        }
         element.textContent = part.rawWord;
 
         if (part.inBible && element instanceof HTMLAnchorElement) {
-          element.href = `/word/${encodeURIComponent(part.normalized)}?source=${encodeURIComponent(route.sourceId)}`;
-          element.dataset.word = part.normalized;
+          const linkedWord = part.matchedWord ?? part.normalized;
+          element.href = `/word/${encodeURIComponent(linkedWord)}?source=${encodeURIComponent(route.sourceId)}`;
+          element.dataset.word = linkedWord;
           element.addEventListener("mouseenter", async () => {
             const data = await loadVerses(route.sourceId);
             showTooltip(element, sampleVerses(part.verseIds, data));
@@ -499,13 +596,22 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
       loadWordIndex(route.sourceId),
       loadVerses(route.sourceId)
     ]);
-    const normalized = normalizeWord(route.word);
-    const verseIds = wordData.words[normalized] ?? [];
+    const resolved = resolveWordMatch(route.word, wordData);
+    const displayWord = resolved.matchedWord ?? resolved.normalized;
+    const verseIds = resolved.verseIds;
+    const normalizationNote =
+      resolved.matchType === "normalized" && resolved.matchedWord
+        ? `<p class="muted">Matched <code>${escapeHtml(route.word)}</code> as <code>${escapeHtml(
+            resolved.matchedWord
+          )}</code>.</p>`
+        : "";
 
     if (!verseIds.length) {
       app.innerHTML = `
         <section class="panel">
-          <h1>${escapeHtml(normalized)} <span class="source-tag">${escapeHtml(wordData.source.shortName)}</span></h1>
+          <h1>${escapeHtml(resolved.normalized)} <span class="source-tag">${escapeHtml(
+            wordData.source.shortName
+          )}</span></h1>
           <p>This word does not appear in the indexed Bible text.</p>
         </section>
       `;
@@ -518,7 +624,8 @@ async function renderWordRoute(route: Extract<Route, { type: "word" }>): Promise
 
     app.innerHTML = `
       <section class="panel">
-        <h1>${escapeHtml(normalized)} <span class="source-tag">${escapeHtml(wordData.source.shortName)}</span></h1>
+        <h1>${escapeHtml(displayWord)} <span class="source-tag">${escapeHtml(wordData.source.shortName)}</span></h1>
+        ${normalizationNote}
         <p>${verses.length} verse references found in ${escapeHtml(wordData.source.name)}.</p>
         <div class="verse-list">
           ${verses
