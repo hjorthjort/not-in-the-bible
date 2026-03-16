@@ -1,4 +1,11 @@
-export type SocialNetworkId = "x" | "instagram" | "bluesky" | "facebook" | "threads" | "tiktok";
+export type SocialNetworkId =
+  | "x"
+  | "instagram"
+  | "bluesky"
+  | "facebook"
+  | "threads"
+  | "tiktok"
+  | "youtube";
 
 export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   x: "X",
@@ -6,7 +13,8 @@ export const SOCIAL_NETWORK_LABELS: Record<SocialNetworkId, string> = {
   bluesky: "Bluesky",
   facebook: "Facebook",
   threads: "Threads",
-  tiktok: "TikTok"
+  tiktok: "TikTok",
+  youtube: "YouTube"
 };
 
 function normalizeHost(hostname: string): string {
@@ -40,6 +48,10 @@ export function getSocialNetworkFromUrl(value: string): SocialNetworkId | null {
 
     if (host === "tiktok.com") {
       return "tiktok";
+    }
+
+    if (host === "youtube.com" || host === "youtu.be") {
+      return "youtube";
     }
 
     return null;

@@ -323,6 +323,10 @@ function detectNetwork(url) {
     return "tiktok";
   }
 
+  if (host === "youtube.com" || host === "youtu.be") {
+    return "youtube";
+  }
+
   throw new SocialEmbedError(400, "Unsupported post URL.");
 }
 
@@ -390,6 +394,39 @@ function normalizeTikTokUrl(url) {
   return `https://www.tiktok.com/@${username}/video/${videoId}`;
 }
 
+function extractYouTubeVideoId(url) {
+  const host = normalizeHost(url.hostname);
+
+  if (host === "youtu.be") {
+    const videoId = url.pathname.replace(/^\/+/, "").split("/")[0];
+    if (videoId) {
+      return videoId;
+    }
+  }
+
+  if (host === "youtube.com") {
+    if (url.pathname === "/watch") {
+      return url.searchParams.get("v");
+    }
+
+    const match = url.pathname.match(/^\/(?:shorts|embed|live)\/([^/]+)/);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
+function normalizeYouTubeUrl(url) {
+  const videoId = extractYouTubeVideoId(url);
+  if (!videoId) {
+    throw new SocialEmbedError(400, "Enter a YouTube video URL.");
+  }
+
+  return `https://www.youtube.com/watch?v=${videoId}`;
+}
+
 function normalizeCanonicalUrl(url) {
   const network = detectNetwork(url);
 
@@ -406,6 +443,8 @@ function normalizeCanonicalUrl(url) {
       return { canonicalUrl: normalizeThreadsUrl(url), network };
     case "tiktok":
       return { canonicalUrl: normalizeTikTokUrl(url), network };
+    case "youtube":
+      return { canonicalUrl: normalizeYouTubeUrl(url), network };
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }
@@ -572,6 +611,23 @@ async function fetchTikTokOEmbed(canonicalUrl, options = {}) {
   };
 }
 
+async function fetchYouTubeEmbed(canonicalUrl, options = {}) {
+  const endpoint = new URL("https://www.youtube.com/oembed");
+  endpoint.searchParams.set("url", canonicalUrl);
+  endpoint.searchParams.set("format", "json");
+
+  const payload = await fetchJson(endpoint, {
+    signal: options.signal
+  });
+
+  return {
+    canonicalUrl,
+    html: payload.html,
+    network: "youtube",
+    text: compactWhitespace(payload.title ?? "")
+  };
+}
+
 export async function fetchSocialEmbed(inputUrl, options = {}) {
   let parsedUrl;
 
@@ -600,6 +656,8 @@ export async function fetchSocialEmbed(inputUrl, options = {}) {
       return fetchThreadsEmbed(canonicalUrl, options);
     case "tiktok":
       return fetchTikTokOEmbed(canonicalUrl, options);
+    case "youtube":
+      return fetchYouTubeEmbed(canonicalUrl, options);
     default:
       throw new SocialEmbedError(400, "Unsupported post URL.");
   }

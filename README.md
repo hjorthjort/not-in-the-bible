@@ -90,7 +90,7 @@ This software is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Notes
 
-- Public oEmbed is used for X, Bluesky, and TikTok.
+- Public oEmbed is used for X, Bluesky, TikTok, and YouTube.
 - Instagram uses the public embed page plus best-effort text extraction. Set `META_EMBED_ACCESS_TOKEN` to enable Meta's official oEmbed path.
 - Facebook uses the public plugin embed plus best-effort text extraction. Set `META_EMBED_ACCESS_TOKEN` to enable Meta's official oEmbed path.
 - Threads uses the public embed page plus meta tag extraction.
