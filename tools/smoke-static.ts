@@ -7,6 +7,7 @@ const ROOT_DIR = path.resolve(".");
 const OUT_DIR = path.join(ROOT_DIR, "out");
 const PORT = 4174;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const SITE_ORIGIN = (process.env.SITE_ORIGIN ?? "https://bible.b-useful.com").replace(/\/$/, "");
 
 function assertExists(relativePath: string): void {
   assert.ok(existsSync(path.join(OUT_DIR, relativePath)), `Expected out/${relativePath} to exist.`);
@@ -47,6 +48,8 @@ async function main(): Promise<void> {
   assertExists("index.html");
   assertExists("404.html");
   assertExists("app-config.js");
+  assertExists("robots.txt");
+  assertExists("sitemap.xml");
   assertExists("styles.css");
   assertExists("assets/bible-wordmark.png");
   assertExists("dist/app.js");
@@ -92,6 +95,17 @@ async function main(): Promise<void> {
     assert.equal(config.status, 200);
     assert.match(config.body, /enableWordNormalization: true/);
 
+    const robots = await fetchText("/robots.txt");
+    assert.equal(robots.status, 200);
+    assert.match(robots.body, /User-agent: \*/);
+    assert.match(robots.body, /Disallow: \/api\//);
+    assert.match(robots.body, new RegExp(`Sitemap: ${escapeRegExp(`${SITE_ORIGIN}/sitemap.xml`)}`));
+
+    const sitemap = await fetchText("/sitemap.xml");
+    assert.equal(sitemap.status, 200);
+    assert.match(sitemap.body, /<urlset /);
+    assert.match(sitemap.body, new RegExp(`<loc>${escapeRegExp(`${SITE_ORIGIN}/`)}</loc>`));
+
     const catalogResponse = await fetch(`${BASE_URL}/data/sources.json`);
     assert.equal(catalogResponse.status, 200);
     const catalogPayload = (await catalogResponse.json()) as { defaultSourceId: string };
@@ -121,3 +135,7 @@ async function main(): Promise<void> {
 }
 
 await main();
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
