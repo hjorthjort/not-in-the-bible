@@ -99,6 +99,12 @@ Researched but not enabled:
 
 This software is licensed under the MIT License. See [LICENSE](LICENSE).
 
+## Third-Party Notices
+
+- No third-party font files are bundled in this repo. The UI uses system font stacks declared in [`styles.css`](styles.css).
+- Public-domain Bible datasets include per-source license metadata in `data/<source>/meta.json` and the source catalog in `data/sources.json`.
+- Third-party software notices are collected in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## Notes
 
 - Public oEmbed is used for X, Bluesky, TikTok, YouTube, and Reddit.
