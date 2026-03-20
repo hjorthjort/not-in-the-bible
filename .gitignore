@@ -1,7 +1,9 @@
 data/source/
 dist/
+dist-bots/
 dist-tools/
 dist-tests/
+bots/state/
 node_modules/
 out/
 site/

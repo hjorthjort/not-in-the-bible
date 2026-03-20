@@ -5,16 +5,24 @@
   "type": "module",
   "scripts": {
     "build:app": "tsc -p tsconfig.app.json",
+    "build:bots": "tsc -p tsconfig.bots.json",
     "build:test": "tsc -p tsconfig.test.json",
     "build:scripts": "tsc -p tsconfig.tools.json",
     "build:data": "npm run build:scripts && node dist-tools/build-bible-data.js",
     "build": "npm run build:app && npm run build:data && node dist-tools/build-static.js",
+    "bot:all": "npm run build:bots && node dist-bots/bots/all/cli.js",
+    "bot:bluesky": "npm run build:bots && node dist-bots/bots/bluesky/cli.js",
+    "bot:reddit": "npm run build:bots && node dist-bots/bots/reddit/cli.js",
+    "bot:x": "npm run build:bots && node dist-bots/bots/x/cli.js",
     "test:smoke": "npm run build:scripts && node dist-tools/smoke-static.js",
     "verify:deploy": "npm run check && npm test && npm run build && npm run test:smoke",
     "start": "node server.mjs",
     "dev": "node server.mjs",
-    "check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.tools.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.tools.json --noEmit && tsc -p tsconfig.bots.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "npm run build:test && node --test dist-tests/tests/**/*.test.js"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

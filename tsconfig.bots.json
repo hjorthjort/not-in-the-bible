@@ -6,9 +6,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmitOnError": true,
-    "outDir": "dist-tests",
+    "outDir": "dist-bots",
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["bots/**/*.ts", "src/lib/**/*.ts", "tests/**/*.ts"]
+  "include": ["bots/**/*.ts", "src/lib/**/*.ts"]
 }
